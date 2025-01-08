@@ -1,5 +1,14 @@
 .streamlit/secrets.toml
 
+# Arquivos de banco de dados e dados
+*.db
+banco_jetfrio.db
+requisicoes.json
+usuarios.json
+perfis.json
+ultimo_numero.json
+tema.json
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

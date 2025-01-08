@@ -1,0 +1,22 @@
+{
+    "administrador": [
+        "dashboard",
+        "requisicoes",
+        "cotacoes",
+        "importacao",
+        "configuracoes",
+        "editar_usuarios",
+        "excluir_usuarios",
+        "editar_perfis",
+        "configuracoes_sistema"
+    ],
+    "comprador": [
+        "dashboard",
+        "requisicoes",
+        "cotacoes",
+        "importacao",
+        "configuracoes",
+        "editar_usuarios",
+        "editar_perfis"
+    ]
+}
