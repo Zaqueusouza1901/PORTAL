@@ -681,7 +681,7 @@ def dashboard():
                 )])
 
                 fig.update_layout(
-                    showlegend=True,
+                    showlegend=False,
                     legend=dict(
                         orientation="h",
                         yanchor="bottom",
