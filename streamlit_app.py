@@ -708,7 +708,7 @@ def dashboard():
     st.markdown("### Requisições Detalhadas")
     if requisicoes_filtradas:
         df_requisicoes = pd.DataFrame([{
-            'Número': f"#{req['numero']}",
+            'Número': f"{req['numero']}",
             'Data/Hora Criação': req['data_hora'],
             'Cliente': req['cliente'],
             'Vendedor': req['vendedor'],
