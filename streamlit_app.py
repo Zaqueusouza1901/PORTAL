@@ -17,7 +17,48 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Estilo personalizado
+def init_notification_js():
+    st.components.v1.html("""
+        <script>
+        if (!window.Notification) {
+            console.log('Este navegador não suporta notificações');
+        } else {
+            if (Notification.permission !== 'granted' && Notification.permission !== 'denied') {
+                Notification.requestPermission().then(function(permission) {
+                    if (permission === 'granted') {
+                        new Notification('Notificações Ativadas', {
+                            body: 'Você receberá notificações sobre suas requisições',
+                            icon: '/favicon.ico'
+                        });
+                    }
+                });
+            }
+        }
+
+        window.createNotification = function(title, body) {
+            if (Notification.permission === 'granted') {
+                new Notification(title, {
+                    body: body,
+                    icon: '/favicon.ico',
+                    requireInteraction: true
+                });
+            }
+        }
+        </script>
+    """, height=0)
+
+def notify(title, message):
+    if st.session_state.get('notificacoes_ativas', True):
+        js = f"""
+        <script>
+        if (typeof window.createNotification === 'function') {{
+            window.createNotification("{title}", "{message}");
+        }}
+        </script>
+        """
+        st.components.v1.html(js, height=0)
+
+# Estilo personalizado com adaptação ao tema
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
@@ -25,16 +66,16 @@ st.markdown("""
     font-family: 'Inter', sans-serif;
 }
 .stApp {
-    background-color: #f8f9fa;
+    transition: all 0.3s ease-in-out;
 }
 .main {
     padding: 2rem;
-    background-color: #BDBDBD;
+    background-color: var(--background-color);
     border-radius: 8px;
     margin: 1rem;
 }
 .sidebar {
-    background-color: #BDBDBD;
+    background-color: var(--background-color);
     padding: 2rem 1rem;
 }
 h1 {
@@ -54,10 +95,39 @@ h1 {
     background-color: #1B81C5;
 }
 .metric-card {
-    background-color: #BDBDBD;
+    background-color: var(--background-color);
     padding: 1.5rem;
     border-radius: 8px;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* Adaptação para inputs */
+.stTextInput input,
+.stPasswordInput input {
+    color: var(--text-color) !important;
+    background-color: var(--background-color) !important;
+    border-color: var(--secondary-background-color) !important;
+}
+
+/* Adaptação para textos */
+.stMarkdown, .stText {
+    color: var(--text-color) !important;
+}
+
+/* Adaptação para containers */
+[data-testid="stForm"] {
+    background-color: var(--background-color) !important;
+    border: 1px solid var(--secondary-background-color) !important;
+}
+
+/* Adaptação para sidebar */
+section[data-testid="stSidebar"] {
+    background-color: var(--background-color) !important;
+}
+
+/* Adaptação para cards */
+div.element-container {
+    color: var(--text-color) !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -111,10 +181,9 @@ def enviar_notificacao(titulo, corpo, numero_requisicao):
 
 def get_permissoes_perfil(perfil):
     permissoes_padrao = {
-        'vendedor': ['dashboard', 'requisicoes'],
+        'vendedor': ['dashboard', 'requisicoes', 'configuracoes'],
         'comprador': ['dashboard', 'requisicoes', 'cotacoes', 'importacao', 'configuracoes'],
-        'administrador': ['dashboard', 'requisicoes', 'cotacoes', 'importacao', 'configuracoes', 
-                         'editar_usuarios', 'excluir_usuarios', 'editar_perfis']
+        'administrador': ['dashboard', 'requisicoes', 'cotacoes', 'importacao', 'configuracoes', 'editar_usuarios', 'excluir_usuarios', 'editar_perfis']
     }
     try:
         with open('perfis.json', 'r', encoding='utf-8') as f:
@@ -390,10 +459,11 @@ def menu_lateral():
             <style>
             section[data-testid="stSidebar"] {
                 width: 6cm !important;
-                background-color: #f8f9fa;
+                background-color: var(--background-color) !important;
             }
             .sidebar-content {
                 padding: 1rem;
+                background-color: var(--background-color) !important;
             }
             .stButton > button {
                 background-color: #2D2C74;
@@ -407,24 +477,35 @@ def menu_lateral():
                 padding: 0.3rem 0.5rem;
             }
             [data-testid="collapsedControl"] {
-                color: #2D2C74 !important;
+                color: var(--text-color) !important;
             }
             div[data-testid="stSidebarNav"] {
                 max-width: 6cm !important;
+                background-color: var(--background-color) !important;
             }
             .user-info {
                 position: fixed;
                 bottom: 60px;
                 padding: 10px;
                 width: 5.5cm;
-                background-color: #f8f9fa;
+                background-color: var(--background-color) !important;
+                color: var(--text-color) !important;
+            }
+            .user-info p {
+                color: var(--text-color) !important;
             }
             .bottom-content {
                 position: fixed;
                 bottom: 20px;
                 width: 6cm;
                 padding: 10px;
-                background-color: #f8f9fa;
+                background-color: var(--background-color) !important;
+            }
+            div[data-testid="stSidebarUserContent"] {
+                background-color: var(--background-color) !important;
+            }
+            .stRadio > label {
+                color: var(--text-color) !important;
             }
             </style>
         """, unsafe_allow_html=True)
@@ -432,9 +513,10 @@ def menu_lateral():
         st.markdown("### Menu")
         st.markdown("---")
         
-        menu_items = ["📊 Dashboard", "📝 Requisições"]
+        menu_items = ["📊 Dashboard", "📝 Requisições", "⚙️ Configurações"]
         if st.session_state['perfil'] in ['administrador', 'comprador']:
-            menu_items.extend(["🛒 Cotações", "✈️ Importação", "⚙️ Configurações"])
+            menu_items.insert(-1, "🛒 Cotações")
+            menu_items.insert(-1, "✈️ Importação")
         
         menu = st.radio("", menu_items, label_visibility="collapsed")
         
@@ -562,32 +644,60 @@ def dashboard():
             try:
                 import plotly.graph_objects as go
                 
-                labels = ['Abertas', 'Em Andamento', 'Finalizadas']
-                values = [abertas, em_andamento, finalizadas]
-                colors = [
-                    status_config['ABERTA']['cor'],
-                    status_config['EM ANDAMENTO']['cor'],
-                    status_config['FINALIZADA']['cor']
-                ]
+                # Dados para o gráfico
+                dados_grafico = []
+                if abertas > 0:
+                    dados_grafico.append(('Abertas', abertas, status_config['ABERTA']['cor']))
+                if em_andamento > 0:
+                    dados_grafico.append(('Em Andamento', em_andamento, status_config['EM ANDAMENTO']['cor']))
+                if finalizadas > 0:
+                    dados_grafico.append(('Finalizadas', finalizadas, status_config['FINALIZADA']['cor']))
+                if recusadas > 0:
+                    dados_grafico.append(('Recusadas', recusadas, status_config['RECUSADA']['cor']))
+
+                # Se não houver dados, incluir todos os status com valor 0
+                if not dados_grafico:
+                    dados_grafico = [
+                        ('Abertas', 0, status_config['ABERTA']['cor']),
+                        ('Em Andamento', 0, status_config['EM ANDAMENTO']['cor']),
+                        ('Finalizadas', 0, status_config['FINALIZADA']['cor']),
+                        ('Recusadas', 0, status_config['RECUSADA']['cor'])
+                    ]
+
+                labels = [d[0] for d in dados_grafico]
+                values = [d[1] for d in dados_grafico]
+                colors = [d[2] for d in dados_grafico]
 
                 fig = go.Figure(data=[go.Pie(
                     labels=labels,
                     values=values,
                     hole=.0,
                     marker=dict(colors=colors),
-                    textinfo='value',
+                    textinfo='value+label',
                     textposition='inside',
-                    textfont_size=14,
-                    hoverinfo='label+value',
-                    showlegend=False
+                    textfont_size=12,
+                    hoverinfo='label+value+percent',
+                    showlegend=True
                 )])
 
                 fig.update_layout(
-                    showlegend=False,
-                    margin=dict(t=0, b=0, l=0, r=0),
+                    showlegend=True,
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="right",
+                        x=1
+                    ),
+                    margin=dict(t=30, b=0, l=0, r=0),
                     height=350,
                     paper_bgcolor='rgba(0,0,0,0)',
                     plot_bgcolor='rgba(0,0,0,0)'
+                )
+
+                fig.update_traces(
+                    textposition='inside',
+                    pull=[0.05] * len(dados_grafico)
                 )
 
                 st.plotly_chart(fig, use_container_width=True)
@@ -599,7 +709,7 @@ def dashboard():
     if requisicoes_filtradas:
         df_requisicoes = pd.DataFrame([{
             'Número': f"#{req['numero']}",
-            'Data/Hora Criação': req['data_hora'],  # Mantém o formato original por enquanto
+            'Data/Hora Criação': req['data_hora'],
             'Cliente': req['cliente'],
             'Vendedor': req['vendedor'],
             'Status': req['status'],
@@ -615,9 +725,10 @@ def dashboard():
                 'Número': st.column_config.TextColumn('Número', width='small'),
                 'Cliente': st.column_config.TextColumn('Cliente', width='medium'),
                 'Vendedor': st.column_config.TextColumn('Vendedor', width='medium'),
-                'Data/Hora': st.column_config.TextColumn('Data/Hora', width='medium'),
+                'Data/Hora Criação': st.column_config.TextColumn('Data/Hora Criação', width='medium'),
                 'Status': st.column_config.TextColumn('Status', width='small'),
-                'Comprador': st.column_config.TextColumn('Comprador', width='medium')
+                'Comprador': st.column_config.TextColumn('Comprador', width='medium'),
+                'Data/Hora Resposta': st.column_config.TextColumn('Data/Hora Resposta', width='medium')
             }
         )
     else:
@@ -625,25 +736,25 @@ def dashboard():
 
 def nova_requisicao():
     if st.session_state.get('modo_requisicao') != 'nova':
-        st.title("Requisições")
+        st.title("REQUISIÇÕES")
         col1, col2 = st.columns([4,1])
         with col2:
-            if st.button("🎯 Nova Requisição", type="primary", use_container_width=True):
+            if st.button("🎯 NOVA REQUISIÇÃO", type="primary", use_container_width=True):
                 st.session_state['modo_requisicao'] = 'nova'
                 if 'items_temp' not in st.session_state:
                     st.session_state.items_temp = []
                 st.rerun()
         return
 
-    st.title("Nova Requisição")
+    st.title("NOVA REQUISIÇÃO")
     col1, col2 = st.columns([1.5,1])
     with col1:
-        cliente = st.text_input("Cliente", key="cliente").upper()
+        cliente = st.text_input("CLIENTE", key="cliente").upper()
     with col2:
-        st.write(f"**Vendedor:** {st.session_state.get('usuario', '')}")
+        st.write(f"**VENDEDOR:** {st.session_state.get('usuario', '')}")
 
     if st.session_state.get('show_qtd_error'):
-        st.markdown('<p style="color: #ff4b4b; margin: 0; padding: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">PREENCHIMENTO OBRIGATÓRIO: Quantidade (apenas números)</p>', unsafe_allow_html=True)
+        st.markdown('<p style="color: #ff4b4b; margin: 0; padding: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">PREENCHIMENTO OBRIGATÓRIO: QUANTIDADE</p>', unsafe_allow_html=True)
 
     if 'items_temp' not in st.session_state:
         st.session_state.items_temp = []
@@ -675,6 +786,7 @@ def nova_requisicao():
         height: 32px !important;
         text-align: center !important;
         font-size: 15px;
+        text-transform: uppercase;
     }
     .stTextInput > div > div > input {
         border-radius: 4px !important;
@@ -695,22 +807,22 @@ def nova_requisicao():
     }
     div[data-testid="column"] {
         padding: 0 !important;
-        margin: 0 !important;
+        margin: 2 !important;
     }
     .stButton > button {
-        border: 0px solid #2D2C74 !important;
-        padding: 0 !important;
-        height: 12px !important;
-        min-width: 12px !important;
-        width: 12px !important;
+        border: 1px solid #2D2C74 !important;
+        padding: 2px !important;
+        height: 10px !important;
+        min-width: 10px !important;
+        width: 10px !important;
         line-height: 1 !important;
-        font-size: 7px !important;
-        display: flex !important;
+        font-size: 12px !important;
+        display: inline-flex !important;
         align-items: center !important;
         justify-content: center !important;
         background-color: #2D2C74 !important;
         color: white !important;
-        margin: 0 1px !important;
+        margin: 0 2px !important;
     }
     .stButton > button:hover {
         background-color: #1B81C5 !important;
@@ -737,11 +849,8 @@ def nova_requisicao():
         margin-bottom: 2px !important;
     }
     div.row-widget.stButton {
-        display: flex !important;
-        justify-content: center !important;
-        align-items: center !important;
-        margin: 0 !important;
-        padding: 0 !important;
+        display: inline-block !important;
+        margin: 0 2px !important;
     }
     div.row-widget {
         margin-bottom: 2px !important;
@@ -753,22 +862,25 @@ def nova_requisicao():
     [data-testid="column"] [data-testid="column"] {
         padding: 0 1px !important;
         margin: 0 !important;
+        display: flex !important;
+        flex-direction: row !important;
+        align-items: center !important;
     }
     </style>
     """, unsafe_allow_html=True)
 
-    st.markdown("### Itens da Requisição")
+    st.markdown("### ITENS DA REQUISIÇÃO")
     st.markdown("""
     <table class="requisicao-table">
     <thead>
     <tr>
     <th style="width: 5%">ITEM</th>
-    <th style="width: 10%">CÓDIGO</th>
-    <th style="width: 15%">CÓD. FABRICANTE</th>
+    <th style="width: 15%">CÓDIGO</th>
+    <th style="width: 20%">CÓD. FABRICANTE</th>
     <th style="width: 35%">DESCRIÇÃO</th>
     <th style="width: 15%">MARCA</th>
-    <th style="width: 8%">QTD</th>
-    <th style="width: 7%">AÇÕES</th>
+    <th style="width: 5%">QTD</th>
+    <th style="width: 5%">AÇÕES</th>
     </tr>
     </thead>
     </table>
@@ -776,7 +888,7 @@ def nova_requisicao():
 
     if st.session_state.items_temp:
         for idx, item in enumerate(st.session_state.items_temp):
-            cols = st.columns([0.5, 1, 1.5, 3.5, 1.5, 0.8, 0.8])
+            cols = st.columns([0.5, 1.5, 2, 3.5, 1.5, 0.5, 0.5])
             editing = st.session_state.get('editing_item') == idx
 
             with cols[0]:
@@ -827,21 +939,21 @@ def nova_requisicao():
                         st.rerun()
 
     proximo_item = len(st.session_state.items_temp) + 1
-    cols = st.columns([0.5, 1, 1.57, 3.65, 1.5, 0.8, 0.8])
+    cols = st.columns([0.5, 1.5, 2, 3.5, 1.5, 0.5, 0.5])
     with cols[0]:
-        st.text_input("", value=str(proximo_item), disabled=True, key="item", label_visibility="collapsed")
+        st.text_input("", value=str(proximo_item), disabled=True, key=f"item_{proximo_item}", label_visibility="collapsed")
     with cols[1]:
-        codigo = st.text_input("", value=st.session_state.get('temp_codigo', ''), key="codigo", label_visibility="collapsed").upper()
+        codigo = st.text_input("", key=f"codigo_{proximo_item}", label_visibility="collapsed").upper()
     with cols[2]:
-        cod_fabricante = st.text_input("", value=st.session_state.get('temp_cod_fab', ''), key="cod_fab", label_visibility="collapsed").upper()
+        cod_fabricante = st.text_input("", key=f"cod_fab_{proximo_item}", label_visibility="collapsed").upper()
     with cols[3]:
-        descricao = st.text_input("", value=st.session_state.get('temp_desc', ''), key="desc", label_visibility="collapsed", help="desc-input").upper()
+        descricao = st.text_input("", key=f"desc_{proximo_item}", label_visibility="collapsed", help="desc-input").upper()
     with cols[4]:
-        marca = st.text_input("", value=st.session_state.get('temp_marca', ''), key="marca", label_visibility="collapsed").upper()
+        marca = st.text_input("", key=f"marca_{proximo_item}", label_visibility="collapsed").upper()
     with cols[5]:
-        quantidade = st.text_input("", value=st.session_state.get('temp_qtd', ''), key="qtd", label_visibility="collapsed")
+        quantidade = st.text_input("", key=f"qtd_{proximo_item}", label_visibility="collapsed")
     with cols[6]:
-        if st.button("➕", key="add"):
+        if st.button("➕", key=f"add_{proximo_item}"):
             if not descricao:
                 st.session_state['show_desc_error'] = True
                 st.rerun()
@@ -861,32 +973,14 @@ def nova_requisicao():
                 st.session_state.items_temp.append(novo_item)
                 st.session_state['show_desc_error'] = False
                 st.session_state['show_qtd_error'] = False
-                
-                # Inicializa e limpa as variáveis temporárias
-                if 'temp_codigo' not in st.session_state:
-                    st.session_state.temp_codigo = ''
-                if 'temp_cod_fab' not in st.session_state:
-                    st.session_state.temp_cod_fab = ''
-                if 'temp_desc' not in st.session_state:
-                    st.session_state.temp_desc = ''
-                if 'temp_marca' not in st.session_state:
-                    st.session_state.temp_marca = ''
-                if 'temp_qtd' not in st.session_state:
-                    st.session_state.temp_qtd = ''
-                
-                st.session_state.temp_codigo = ''
-                st.session_state.temp_cod_fab = ''
-                st.session_state.temp_desc = ''
-                st.session_state.temp_marca = ''
-                st.session_state.temp_qtd = ''
                 st.rerun()
 
     if st.session_state.items_temp:
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("✅ Enviar", type="primary", use_container_width=True):
+            if st.button("✅ ENVIAR", type="primary", use_container_width=True):
                 if not cliente:
-                    st.error("PREENCHIMENTO OBRIGATÓRIO: Cliente")
+                    st.error("PREENCHIMENTO OBRIGATÓRIO: CLIENTE")
                     return
                 nova_requisicao = {
                     'numero': get_next_requisition_number(),
@@ -903,7 +997,7 @@ def nova_requisicao():
                 st.session_state['modo_requisicao'] = None
                 st.rerun()
         with col2:
-            if st.button("❌ Cancelar", type="secondary", use_container_width=True):
+            if st.button("❌ CANCELAR", type="secondary", use_container_width=True):
                 st.session_state.items_temp = []
                 st.session_state['modo_requisicao'] = None
                 st.rerun()
@@ -916,7 +1010,7 @@ def salvar_configuracoes():
         st.error(f"Erro ao salvar configurações: {e}")
 
 def requisicoes():
-    st.title("Requisições")
+    st.title("REQUISIÇÕES")
     
     # Atualização automática
     if 'ultima_atualizacao' not in st.session_state:
@@ -939,11 +1033,23 @@ def requisicoes():
         }
         .requisicao-card {
             background-color: white;
-            padding: 8px;
+            padding: 4px;
             border-radius: 8px;
-            margin-bottom: 8px;
+            margin-bottom: 4px;
             border-left: 4px solid #2D2C74;
             transition: all 0.3s ease;
+        }
+        .requisicao-card.expandido {
+            border-radius: 8px 8px 0 0;
+            margin-bottom: 0;
+        }
+        .card-expandido {
+            margin-top: -4px;
+            border-top: none;
+            border-radius: 0 0 8px 8px;
+            background-color: #f8f9fa;
+            padding: 5px;
+            border-left: 4px solid #2D2C74;
         }
         .requisicao-card:hover {
             box-shadow: 0 4px 8px rgba(0,0,0,0.1);
@@ -1016,6 +1122,7 @@ def requisicoes():
             text-align: center;
             font-weight: 500;
             white-space: nowrap;
+            text-transform: uppercase;
         }
         .requisicao-table td {
             padding: 6px 8px;
@@ -1026,19 +1133,19 @@ def requisicoes():
         .requisicao-table td:nth-child(1),
         .requisicao-table th:nth-child(1) { width: 5%; }
         .requisicao-table td:nth-child(2),
-        .requisicao-table th:nth-child(2) { width: 10%; }
+        .requisicao-table th:nth-child(2) { width: 15%; }
         .requisicao-table td:nth-child(3),
         .requisicao-table th:nth-child(3) { width: 35%; }
         .requisicao-table td:nth-child(4),
         .requisicao-table th:nth-child(4) { width: 10%; }
         .requisicao-table td:nth-child(5),
-        .requisicao-table th:nth-child(5) { width: 8%; text-align: center; }
+        .requisicao-table th:nth-child(5) { width: 5%; text-align: center; }
         .requisicao-table td:nth-child(6),
-        .requisicao-table th:nth-child(6) { width: 12%; text-align: right; }
+        .requisicao-table th:nth-child(6) { width: 10%; text-align: right; }
         .requisicao-table td:nth-child(7),
-        .requisicao-table th:nth-child(7) { width: 10%; text-align: center; }
+        .requisicao-table th:nth-child(7) { width: 10%; text-align: right; }
         .requisicao-table td:nth-child(8),
-        .requisicao-table th:nth-child(8) { width: 15%; }
+        .requisicao-table th:nth-child(8) { width: 10%; text-align: center; }
         .valor-cell { 
             text-align: right; 
         }
@@ -1046,14 +1153,31 @@ def requisicoes():
             padding: 10px;
             background-color: white;
             border-top: 1px solid #eee;
-            margin-top: 8px;
+            margin-top: 3px;
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
         }
         .input-container {
             background-color: white;
             padding: 10px;
             border-radius: 8px;
-            margin-top: 12px;
+            margin-top: 1px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .observacao-geral {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+        }
+        .btn-aceitar {
+            background-color: #2e7d32 !important;
+            color: white !important;
+        }
+        .btn-recusar {
+            background-color: #c62828 !important;
+            color: white !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -1061,7 +1185,7 @@ def requisicoes():
     # Botão Nova Requisição
     col1, col2 = st.columns([4,1])
     with col2:
-        if st.button("📝 Nova Requisição", key="nova_req", type="primary"):
+        if st.button("📝 NOVA REQUISIÇÃO", key="nova_req", type="primary"):
             st.session_state['modo_requisicao'] = 'nova'
             st.rerun()
 
@@ -1075,18 +1199,18 @@ def requisicoes():
             # Primeira linha de filtros
             col1, col2, col3, col4 = st.columns([2,2,3,1])
             with col1:
-                numero_busca = st.text_input("🔍 Número da Requisição", key="busca_numero")
+                numero_busca = st.text_input("🔍 NÚMERO DA REQUISIÇÃO", key="busca_numero")
             with col2:
-                cliente_busca = st.text_input("👥 Cliente", key="busca_cliente")
+                cliente_busca = st.text_input("👥 CLIENTE", key="busca_cliente")
             with col3:
                 data_col1, data_col2 = st.columns(2)
                 with data_col1:
-                    data_inicial = st.date_input("Data Inicial", value=None, key="data_inicial")
+                    data_inicial = st.date_input("DATA INICIAL", value=None, key="data_inicial")
                 with data_col2:
-                    data_final = st.date_input("Data Final", value=None, key="data_final")
+                    data_final = st.date_input("DATA FINAL", value=None, key="data_final")
             with col4:
                 st.markdown("<br>", unsafe_allow_html=True)
-                buscar = st.button("🔎 Buscar", type="primary", use_container_width=True)
+                buscar = st.button("🔎 BUSCAR", type="primary", use_container_width=True)
 
             # Status como chips coloridos
             status_opcoes = {
@@ -1096,7 +1220,7 @@ def requisicoes():
                 "RECUSADA": "🔴"
             }
             selected_status = st.multiselect(
-                "Status",
+                "STATUS",
                 options=list(status_opcoes.keys()),
                 default=["ABERTA", "EM ANDAMENTO"] if st.session_state['perfil'] != 'vendedor' else list(status_opcoes.keys()),
                 format_func=lambda x: f"{status_opcoes[x]} {x}"
@@ -1122,7 +1246,7 @@ def requisicoes():
                 requisicoes_visiveis = [req for req in requisicoes_visiveis if data_inicial_str <= req['data_hora'].split()[0] <= data_final_str]
 
         if not requisicoes_visiveis:
-            st.warning("Nenhuma requisição encontrada com os filtros selecionados.")
+            st.warning("NENHUMA REQUISIÇÃO ENCONTRADA COM OS FILTROS SELECIONADOS.")
 
         # Ordenação por número em ordem decrescente
         requisicoes_visiveis.sort(key=lambda x: x['numero'], reverse=True)
@@ -1136,215 +1260,249 @@ def requisicoes():
                         else 'rgba(241, 196, 15, 0.1)' if req['status'] == 'EM ANDAMENTO'
                         else 'rgba(52, 152, 219, 0.1)' if req['status'] == 'FINALIZADA'
                         else 'rgba(231, 76, 60, 0.1)' if req['status'] == 'RECUSADA'
-                        else 'white'}">
-                        <div class="requisicao-info">
+                        else 'var(--background-color)'};
+                        color: var(--text-color)">
+                        <div class="requisicao-info" style="color: var(--text-color)">
                             <div>
-                                <span class="requisicao-numero">#{req['numero']}</span>
-                                <span class="requisicao-cliente">{req['cliente']}</span>
+                                <span class="requisicao-numero" style="color: var(--text-color)">#</span>
+                                <span class="requisicao-numero" style="color: var(--text-color)">{req['numero']}</span>
+                                <span class="requisicao-cliente" style="color: var(--text-color)">{req['cliente']}</span>
                             </div>
                             <div>
                                 <span class="status-badge status-{req['status'].lower()}">{req['status']}</span>
                             </div>
                         </div>
-                        <div class="requisicao-data">
-                            <span>Criado em: {req['data_hora']}</span>
-                            <span>Vendedor: {req['vendedor']}</span>
+                        <div class="requisicao-data" style="color: var(--text-color)">
+                            <span>CRIADO EM: {req['data_hora']}</span>
+                            <span>VENDEDOR: {req['vendedor']}</span>
                         </div>
                     </div>
                 """, unsafe_allow_html=True)
 
-                if st.button(f"Ver Detalhes", key=f"detalhes_{req['numero']}_{idx}"):
-                    # Fechar todos os outros detalhes
+                if st.button(f"VER DETALHES", key=f"detalhes_{req['numero']}_{idx}"):
                     for key in list(st.session_state.keys()):
                         if key.startswith('mostrar_detalhes_') and key != f'mostrar_detalhes_{req["numero"]}':
                             st.session_state.pop(key)
-                    # Abrir apenas o detalhe atual
                     st.session_state[f'mostrar_detalhes_{req["numero"]}'] = True
                     st.rerun()
 
                 if st.session_state.get(f'mostrar_detalhes_{req["numero"]}', False):
                     with st.container():
-                        st.markdown('<div class="detalhes-container">', unsafe_allow_html=True)
+                        st.markdown("""
+                            <div class="detalhes-container" style="
+                                background-color: var(--background-color);
+                                color: var(--text-color) !important;
+                                border: 1px solid var(--secondary-background-color);">
+                        """, unsafe_allow_html=True)
                         
-                        # Cabeçalho com título e botão fechar
-                        st.markdown('<div class="detalhes-header">', unsafe_allow_html=True)
-                        col1, col2 = st.columns([3,1])
-                        with col1:
-                            st.markdown(f"### Requisição #{req['numero']} - {req['cliente']}")
-                        with col2:
-                            if st.button("❌ Fechar", key=f"fechar_{req['numero']}_{idx}"):
-                                st.session_state.pop(f'mostrar_detalhes_{req["numero"]}')
-                                st.rerun()
+                        st.markdown("""
+                            <div class="detalhes-header" style="
+                                background-color: var(--background-color);
+                                color: var(--text-color) !important;
+                                border-bottom: 1px solid var(--secondary-background-color);">
+                        """, unsafe_allow_html=True)
+                        
+                        if req['status'] == 'ABERTA' and st.session_state['perfil'] in ['comprador', 'administrador']:
+                            col1, col2, col3, col4 = st.columns([2,1,1,1])
+                            with col2:
+                                if st.button("✅", key=f"aceitar_{req['numero']}", type="primary"):
+                                    req['status'] = 'EM ANDAMENTO'
+                                    req['comprador_responsavel'] = st.session_state['usuario']
+                                    req['data_hora_aceite'] = get_data_hora_brasil()
+                                    if salvar_requisicoes():
+                                        enviar_notificacao(
+                                            f"Requisição {req['numero']} Aceita",
+                                            f"{st.session_state['usuario']} aceitou a requisição Nº{req['numero']} para o cliente {req['cliente']}",
+                                            req['numero']
+                                        )
+                                        st.success("Requisição aceita com sucesso!")
+                                        st.rerun()
+                            with col3:
+                                if st.button("❌", key=f"recusar_{req['numero']}", type="primary"):
+                                    st.session_state[f'mostrar_justificativa_{req["numero"]}'] = True
+                                    st.rerun()
+                            with col4:
+                                if st.button("FECHAR", key=f"fechar_{req['numero']}_{idx}"):
+                                    st.session_state.pop(f'mostrar_detalhes_{req["numero"]}')
+                                    st.rerun()
+                        else:
+                            col1, col2 = st.columns([3,1])
+                            with col2:
+                                if st.button("FECHAR", key=f"fechar_{req['numero']}_{idx}"):
+                                    st.session_state.pop(f'mostrar_detalhes_{req["numero"]}')
+                                    st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
 
-                        # Informações da requisição
                         st.markdown(f"""
-                            <div class="header-info">
+                            <div class="header-info" style="
+                                background-color: var(--background-color);
+                                color: var(--text-color) !important;
+                                border-bottom: 1px solid var(--secondary-background-color);">
                                 <div class="header-group">
-                                    <p><strong>Criado em:</strong> {req['data_hora']}</p>
-                                    <p><strong>Vendedor:</strong> {req['vendedor']}</p>
+                                    <p style="color: var(--text-color) !important"><strong style="color: var(--text-color) !important">CRIADO EM:</strong> {req['data_hora']}</p>
+                                    <p style="color: var(--text-color) !important"><strong style="color: var(--text-color) !important">VENDEDOR:</strong> {req['vendedor']}</p>
                                 </div>
                                 <div class="header-group">
-                                    <p><strong>Respondido em:</strong> {req.get('data_hora_resposta', '-')}</p>
-                                    <p><strong>Comprador:</strong> {req.get('comprador_responsavel', '-')}</p>
+                                    <p style="color: var(--text-color) !important"><strong style="color: var(--text-color) !important">RESPONDIDO EM:</strong> {req.get('data_hora_resposta','-')}</p>
+                                    <p style="color: var(--text-color) !important"><strong style="color: var(--text-color) !important">COMPRADOR:</strong> {req.get('comprador_responsavel', '-')}</p>
                                 </div>
                             </div>
                         """, unsafe_allow_html=True)
 
+                        # Campo de justificativa (aparece somente após clicar em recusar)
+                        if st.session_state.get(f'mostrar_justificativa_{req["numero"]}', False):
+                            st.markdown("### JUSTIFICATIVA DA RECUSA")
+                            justificativa = st.text_area(
+                                "Digite a justificativa da recusa",
+                                key=f"justificativa_{req['numero']}",
+                                height=100
+                            )
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                if st.button("CONFIRMAR RECUSA", key=f"confirmar_recusa_{req['numero']}", type="primary", use_container_width=True):
+                                    if not justificativa:
+                                        st.error("Por favor, informe a justificativa da recusa.")
+                                        return
+                                    req['status'] = 'RECUSADA'
+                                    req['comprador_responsavel'] = st.session_state['usuario']
+                                    req['data_hora_resposta'] = get_data_hora_brasil()
+                                    req['justificativa_recusa'] = justificativa
+                                    if salvar_requisicoes():
+                                        enviar_notificacao(
+                                            f"Requisição {req['numero']} Recusada",
+                                            f"{st.session_state['usuario']} recusou a requisição Nº{req['numero']} para o cliente {req['cliente']}. Justificativa: {justificativa}",
+                                            req['numero']
+                                        )
+                                        st.success("Requisição recusada com sucesso!")
+                                        st.rerun()
+                            with col2:
+                                if st.button("CANCELAR", key=f"cancelar_recusa_{req['numero']}", type="secondary", use_container_width=True):
+                                    st.session_state.pop(f'mostrar_justificativa_{req["numero"]}')
+                                    st.rerun()
+
                         # Itens da requisição
-                        st.markdown('<div class="items-title">Itens da Requisição</div>', unsafe_allow_html=True)
+                        st.markdown('<div class="items-title">ITENS DA REQUISIÇÃO</div>', unsafe_allow_html=True)
                         if req['items']:
-                            st.markdown("""
-                                <table class="requisicao-table">
-                                    <thead>
-                                        <tr>
-                                            <th>CÓDIGO</th>
-                                            <th>CÓD. FABRICANTE</th>
-                                            <th>DESCRIÇÃO</th>
-                                            <th>MARCA</th>
-                                            <th>QUANTIDADE</th>
-                                            <th>PREÇO VENDA</th>
-                                            <th>PRAZO</th>
-                                            <th>OBSERVAÇÃO</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                            """, unsafe_allow_html=True)
+                            items_df = pd.DataFrame([{
+                                'Código': item.get('codigo', '-'),
+                                'Cód. Fabricante': item.get('cod_fabricante', '-'),
+                                'Descrição': item['descricao'],
+                                'Marca': item.get('marca', 'PC'),
+                                'QTD': item['quantidade'],
+                                'R$ Venda Unit': f"R$ {item.get('venda_unit', 0):.2f}",
+                                'R$ Total': f"R$ {(item.get('venda_unit', 0) * item['quantidade']):.2f}",
+                                'Prazo': item.get('prazo_entrega', '-')
+                            } for item in req['items']])
 
-                            for item in req['items']:
-                                st.markdown(f"""
-                                    <tr>
-                                        <td>{item.get('codigo', '-')}</td>
-                                        <td>{item.get('cod_fabricante', '-')}</td>
-                                        <td style="text-align: left;">{item['descricao']}</td>
-                                        <td>{item.get('marca', 'PC')}</td>
-                                        <td class="valor-cell">{item['quantidade']}</td>
-                                        <td class="valor-cell">R$ {item.get('venda_unit', 0):.2f}</td>
-                                        <td>{item.get('prazo_entrega', '-')}</td>
-                                        <td>{item.get('observacao', '-')}</td>
-                                    </tr>
-                                """, unsafe_allow_html=True)
-                            st.markdown("</tbody></table>", unsafe_allow_html=True)
+                            st.dataframe(
+                                items_df,
+                                hide_index=True,
+                                use_container_width=True,
+                                column_config={
+                                    "Código": st.column_config.TextColumn("CÓDIGO", width=35),
+                                    "Cód. Fabricante": st.column_config.TextColumn("CÓD. FABRICANTE", width=100),
+                                    "Descrição": st.column_config.TextColumn("DESCRIÇÃO", width=350),
+                                    "Marca": st.column_config.TextColumn("MARCA", width=80),
+                                    "QTD": st.column_config.NumberColumn("QTD", width=30),
+                                    "R$ Venda Unit": st.column_config.TextColumn("R$ VENDA UNIT", width=70),
+                                    "R$ Total": st.column_config.TextColumn("R$ TOTAL", width=80),
+                                    "Prazo": st.column_config.TextColumn("PRAZO", width=100)
+                                }
+                            )
 
-                        # Exibir justificativa de recusa apenas nos detalhes quando status for RECUSADA
-                        if req['status'] == 'RECUSADA' and 'justificativa_recusa' in req:
-                            st.markdown(f"""
-                                <div style="background-color: rgba(231, 76, 60, 0.1); padding: 10px; border-radius: 4px; margin-top: 10px;">
-                                    <p style="color: #c62828; margin: 0; font-weight: bold;">Justificativa da Recusa:</p>
-                                    <p style="margin: 5px 0 0 0;">{req.get("justificativa_recusa", "")}</p>
-                                    <p style="margin: 5px 0 0 0; font-size: 12px; color: #666;">
-                                        Recusado por: {req.get("comprador_responsavel", "-")} em {req.get("data_hora_recusa", "-")}
-                                    </p>
-                                </div>
-                            """, unsafe_allow_html=True)
+                            # Exibição da observação do comprador
+                            if req.get('observacao_geral'):
+                                st.markdown("""
+                                    <div style='background-color: #f0f2f6; border-radius: 4px; padding: 15px; margin: 20px 0 25px 0; border-left: 4px solid #2D2C74;'>
+                                        <p style='color: #2D2C74; font-weight: bold; margin-bottom: 10px;'>OBSERVAÇÕES DO COMPRADOR:</p>
+                                        <p style='margin: 0 0 5px 0;'>{}</p>
+                                    </div>
+                                """.format(req['observacao_geral']), unsafe_allow_html=True)
 
-                        # Botões de ação conforme o status
-                        if st.session_state['perfil'] in ['administrador', 'comprador']:
-                            st.markdown('<div class="action-buttons">', unsafe_allow_html=True)
-                            if req['status'] == 'ABERTA':
-                                col1, col2 = st.columns([1,1])
-                                with col1:
-                                    if st.button("✅ Aceitar", key=f"aceitar_{req['numero']}_{idx}", type="primary"):
-                                        req['status'] = 'EM ANDAMENTO'
-                                        req['comprador_responsavel'] = st.session_state['usuario']
-                                        req['data_hora_aceite'] = get_data_hora_brasil()
-                                        salvar_requisicoes()
-                                        st.success("Requisição aceita com sucesso!")
-                                        st.rerun()
-                                with col2:
-                                    if st.button("❌ Recusar", key=f"recusar_{req['numero']}_{idx}", type="secondary"):
-                                        st.session_state[f'mostrar_justificativa_{req["numero"]}_{idx}'] = True
-                                        st.rerun()
-
-                                # Formulário de justificativa
-                                if st.session_state.get(f'mostrar_justificativa_{req["numero"]}_{idx}', False):
-                                    with st.form(key=f"form_justificativa_{req['numero']}_{idx}"):
-                                        justificativa = st.text_area("Digite a justificativa da recusa", height=70)
-                                        col1, col2 = st.columns(2)
-                                        
-                                        with col1:
-                                            if st.form_submit_button("✅ Confirmar Recusa", type="primary", use_container_width=True):
-                                                if justificativa.strip():
-                                                    req['status'] = 'RECUSADA'
-                                                    req['justificativa_recusa'] = justificativa
-                                                    req['data_hora_recusa'] = get_data_hora_brasil()
-                                                    req['comprador_responsavel'] = st.session_state['usuario']
-                                                    salvar_requisicoes()
-                                                    st.session_state.pop(f'mostrar_justificativa_{req["numero"]}_{idx}')
-                                                    st.success("Requisição recusada com sucesso!")
-                                                    st.rerun()
-                                                else:
-                                                    st.error("Por favor, preencha a justificativa")
-                                        
-                                        with col2:
-                                            if st.form_submit_button("❌ Cancelar", type="secondary", use_container_width=True):
-                                                st.session_state.pop(f'mostrar_justificativa_{req["numero"]}_{idx}')
-                                                st.rerun()
-
-                            elif req['status'] == 'EM ANDAMENTO':
+                            if req['status'] == 'EM ANDAMENTO' and st.session_state['perfil'] in ['comprador', 'administrador']:
                                 st.markdown('<div class="input-container">', unsafe_allow_html=True)
-                                # Interface para resposta do comprador
-                                for item_idx, item in enumerate(req['items']):
-                                    with st.container():
-                                        col1, col2, col3, col4, col5 = st.columns([1,1,1,1,1])
-                                        with col1:
-                                            item['custo_unit'] = st.number_input(
-                                                f"R$ UNIT Item {item['item']} *",
-                                                value=item.get('custo_unit', 0.0),
-                                                format="%.2f",
-                                                key=f"custo_{req['numero']}_{item['item']}_{idx}_{item_idx}"
-                                            )
-                                        with col2:
-                                            item['markup'] = st.number_input(
-                                                f"% MARKUP Item {item['item']} *",
-                                                value=item.get('markup', 0.0),
-                                                format="%.2f",
-                                                key=f"markup_{req['numero']}_{item['item']}_{idx}_{item_idx}"
-                                            )
-                                        with col3:
-                                            item['prazo_entrega'] = st.date_input(
-                                                "Prazo*",
-                                                value=datetime.now(),
-                                                min_value=datetime.now(),
-                                                key=f"prazo_{req['numero']}_{item['item']}_{idx}_{item_idx}"
-                                            )
-                                        with col4:
-                                            item['observacao'] = st.text_area(
-                                                "Observações",
-                                                value=item.get('observacao', ''),
-                                                height=100,
-                                                key=f"obs_{req['numero']}_{item['item']}_{idx}_{item_idx}"
-                                            )
-                                        with col5:
-                                            item['venda_unit'] = item['custo_unit'] * (1 + item['markup']/100)
-                                            st.text_input(
-                                                "R$ VENDA UNIT",
-                                                value=f"R$ {item['venda_unit']:.2f}",disabled=True,
-                                                key=f"venda_{req['numero']}_{item['item']}_{idx}_{item_idx}"
-                                            )
-                                        if st.button("💾 Salvar Item", key=f"salvar_item_{req['numero']}_{item['item']}_{idx}_{item_idx}"):
-                                            if item['custo_unit'] > 0 and item['markup'] > 0:
-                                                item['salvo'] = True
-                                                salvar_requisicoes()
-                                                st.success(f"Item {item['item']} salvo com sucesso!")
-                                                st.rerun()
+                                
+                                # Seleção do item para resposta
+                                item_selecionado = st.selectbox(
+                                    "SELECIONE O ITEM PARA RESPONDER",
+                                    options=[f"ITEM {item['item']}: {item['descricao']}" for item in req['items']],
+                                    key=f"select_item_{req['numero']}"
+                                )
+                                
+                                # Índice do item selecionado
+                                item_idx = int(item_selecionado.split(':')[0].replace('ITEM ', '')) - 1
+                                item = req['items'][item_idx]
 
-                                # Botão de finalizar quando todos os itens estiverem salvos
-                                todos_itens_salvos = all(item.get('salvo', False) for item in req['items'])
-                                if todos_itens_salvos:
-                                    if st.button("✅ Finalizar", key=f"finalizar_{req['numero']}_{idx}", type="primary"):
-                                        req['status'] = 'FINALIZADA'
-                                        req['data_hora_resposta'] = get_data_hora_brasil()
-                                        if salvar_requisicoes():
-                                            enviar_notificacao(
-                                                f"Requisição {req['numero']} Finalizada",
-                                                f"{st.session_state['usuario']} finalizou a requisição Nº{req['numero']} para o cliente {req['cliente']}",
-                                                req['numero']
-                                            )
-                                            st.success("Requisição finalizada com sucesso!")
-                                            st.rerun()
-                                        else:
-                                            st.error("Erro ao salvar a requisição. Tente novamente.")
+                                # Campos de resposta em linha única
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    item['custo_unit'] = st.number_input(
+                                        "R$ UNIT",
+                                        value=item.get('custo_unit', 0.0),
+                                        min_value=0.0,
+                                        format="%.2f",
+                                        key=f"custo_{req['numero']}_{item_idx}"
+                                    )
+                                with col2:
+                                    item['markup'] = st.number_input(
+                                        "% MARKUP",
+                                        value=item.get('markup', 0.0),
+                                        min_value=0.0,
+                                        format="%.2f",
+                                        step=1.0,
+                                        key=f"markup_{req['numero']}_{item_idx}"
+                                    )
+                                with col3:
+                                    item['prazo_entrega'] = st.text_input(
+                                        "PRAZO",
+                                        value=item.get('prazo_entrega', ''),
+                                        key=f"prazo_{req['numero']}_{item_idx}"
+                                    )
+
+                                # Checkbox e campo para observações
+                                mostrar_obs = st.checkbox(
+                                    "INCLUIR OBSERVAÇÕES",
+                                    key=f"show_obs_{req['numero']}"
+                                )
+                                observacao_geral = ""
+                                if mostrar_obs:
+                                    observacao_geral = st.text_area(
+                                        "OBSERVAÇÕES GERAIS",
+                                        value=req.get('observacao_geral', ''),
+                                        height=100,
+                                        key=f"obs_{req['numero']}"
+                                    )
+
+                                # Botões alinhados horizontalmente
+                                col_btn1, col_btn2 = st.columns(2)
+                                with col_btn1:
+                                    if st.button("💾 SALVAR ITEM", key=f"salvar_{req['numero']}_{item_idx}", type="primary"):
+                                        # Calcular valor de venda
+                                        item['venda_unit'] = item['custo_unit'] * (1 + (item['markup'] / 100))
+                                        item['venda_total'] = item['venda_unit'] * item['quantidade']
+                                        item['salvo'] = True
+                                        if mostrar_obs:
+                                            req['observacao_geral'] = observacao_geral
+                                        salvar_requisicoes()
+                                        st.success(f"ITEM {item['item']} SALVO COM SUCESSO!")
+                                        st.rerun()
+                                
+                                with col_btn2:
+                                    todos_itens_salvos = all(item.get('salvo', False) for item in req['items'])
+                                    if todos_itens_salvos:
+                                        if st.button("✅ FINALIZAR", key=f"finalizar_{req['numero']}", type="primary"):
+                                            req['status'] = 'FINALIZADA'
+                                            req['data_hora_resposta'] = get_data_hora_brasil()
+                                            if salvar_requisicoes():
+                                                enviar_notificacao(
+                                                    f"REQUISIÇÃO {req['numero']} FINALIZADA",
+                                                    f"{st.session_state['usuario']} finalizou a requisição Nº{req['numero']} para o cliente {req['cliente']}",
+                                                    req['numero']
+                                                )
+                                                st.success("REQUISIÇÃO FINALIZADA COM SUCESSO!")
+                                                st.rerun()
+                                            else:
+                                                st.error("ERRO AO SALVAR A REQUISIÇÃO. TENTE NOVAMENTE.")
 
 def configurar_notificacoes():
     st.markdown("#### Configurações de Notificações")
@@ -1368,6 +1526,17 @@ def configurar_notificacoes():
             st.success("Notificações ativadas com sucesso!")
         else:
             st.warning("Notificações desativadas")
+    
+    # Botão de teste de notificação
+    st.markdown("---")
+    st.markdown("#### Testar Notificações")
+    if st.button("🔔 Enviar Notificação de Teste", type="primary"):
+        enviar_notificacao(
+            "Teste de Notificação",
+            "Se você está vendo esta mensagem, as notificações estão funcionando corretamente!",
+            "teste"
+        )
+        st.success("Notificação de teste enviada!")
                                         
 def save_tema(tema):
     try:
@@ -1381,30 +1550,27 @@ def save_tema(tema):
 def configuracoes():
     st.title("Configurações")
     
-    # Menu principal
-def configuracoes():
-    st.title("Configurações")
-    
-    # Menu principal
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if st.button("👥 Usuários", type="primary", use_container_width=True):
-            st.session_state['config_modo'] = 'usuarios'
-            st.rerun()
-    
-    with col2:
-        if st.button("🔑 Perfis", type="primary", use_container_width=True):
-            st.session_state['config_modo'] = 'perfis'
-            st.rerun()
-    
-    with col3:
-        if st.button("⚙️ Sistema", type="primary", use_container_width=True):
-            st.session_state['config_modo'] = 'sistema'
-            st.rerun()
+    # Menu principal apenas para administradores
+    if st.session_state['perfil'] == 'administrador':
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("👥 Usuários", type="primary", use_container_width=True):
+                st.session_state['config_modo'] = 'usuarios'
+                st.rerun()
+        with col2:
+            if st.button("🔑 Perfis", type="primary", use_container_width=True):
+                st.session_state['config_modo'] = 'perfis'
+                st.rerun()
+        with col3:
+            if st.button("⚙️ Sistema", type="primary", use_container_width=True):
+                st.session_state['config_modo'] = 'sistema'
+                st.rerun()
+    else:
+        # Para outros perfis, mostrar diretamente as configurações de sistema
+        st.session_state['config_modo'] = 'sistema'
 
-    # Seção de Usuários
-    if st.session_state.get('config_modo') == 'usuarios':
+    # Seção de Usuários (apenas para administradores)
+    if st.session_state.get('config_modo') == 'usuarios' and st.session_state['perfil'] == 'administrador':
         st.markdown("""
             <style>
             .stButton > button {
@@ -1481,9 +1647,7 @@ def configuracoes():
                         st.rerun()
 
         # Busca e Edição
-        busca = st.text_input("🔍 Buscar usuário").upper()
-        usuarios_filtrados = {k: v for k, v in st.session_state.usuarios.items() 
-                            if busca in k.upper() or busca in v['email'].upper()}
+        usuarios_filtrados = st.session_state.usuarios
 
         if usuarios_filtrados:
             st.markdown("#### Editar Usuário")
@@ -1735,6 +1899,8 @@ def configuracoes():
                 configurar_notificacoes()
 
 def main():
+    init_notification_js()
+    
     if 'usuario' not in st.session_state:
         tela_login()
     else:
