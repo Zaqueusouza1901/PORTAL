@@ -697,7 +697,7 @@ def dashboard():
 
                 fig.update_traces(
                     textposition='inside',
-                    pull=[0.05] * len(dados_grafico)
+                    pull=[0.00] * len(dados_grafico)
                 )
 
                 st.plotly_chart(fig, use_container_width=True)
