@@ -4,5 +4,4 @@ plotly==5.24.1
 plotly-express==0.4.1
 pytz==2024.2
 python-dotenv==1.0.0
-smtplib3==0.0.1
 email-validator==2.1.0.post1
