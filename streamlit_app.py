@@ -675,7 +675,7 @@ def dashboard():
                     marker=dict(colors=colors),
                     textinfo='value+label',
                     textposition='inside',
-                    textfont_size=14,
+                    textfont_size=13,
                     hoverinfo='label+value+percent',
                     showlegend=True
                 )])
