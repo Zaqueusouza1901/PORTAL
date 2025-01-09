@@ -1361,7 +1361,7 @@ def requisicoes():
                             </div>
                         """, unsafe_allow_html=True)
 
-                        # Campo de justificativa (aparece somente após clicar em recusar)
+                         # Campo de justificativa (aparece somente após clicar em recusar)
                         if st.session_state.get(f'mostrar_justificativa_{req["numero"]}', False):
                             st.markdown("### JUSTIFICATIVA DA RECUSA")
                             justificativa = st.text_area(
@@ -1375,18 +1375,24 @@ def requisicoes():
                                     if not justificativa:
                                         st.error("Por favor, informe a justificativa da recusa.")
                                         return
+                                    
                                     req['status'] = 'RECUSADA'
                                     req['comprador_responsavel'] = st.session_state['usuario']
                                     req['data_hora_resposta'] = get_data_hora_brasil()
                                     req['justificativa_recusa'] = justificativa
+                                    
                                     if salvar_requisicoes():
-                                        enviar_notificacao(
-                                            f"Requisição {req['numero']} Recusada",
-                                            f"{st.session_state['usuario']} recusou a requisição Nº{req['numero']} para o cliente {req['cliente']}. Justificativa: {justificativa}",
-                                            req['numero']
-                                        )
-                                        st.success("Requisição recusada com sucesso!")
-                                        st.rerun()
+                                        try:
+                                            enviar_notificacao(
+                                                f"Requisição {req['numero']} Recusada",
+                                                f"{st.session_state['usuario']} recusou a requisição Nº{req['numero']} para o cliente {req['cliente']}. Justificativa: {justificativa}",
+                                                req['numero']
+                                            )
+                                            st.success("Requisição recusada com sucesso!")
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(f"Erro ao enviar notificação: {str(e)}")
+                                    
                             with col2:
                                 if st.button("CANCELAR", key=f"cancelar_recusa_{req['numero']}", type="secondary", use_container_width=True):
                                     st.session_state.pop(f'mostrar_justificativa_{req["numero"]}')
@@ -1422,12 +1428,45 @@ def requisicoes():
                                 }
                             )
 
+                            # Exibição da justificativa de recusa
+                            if req['status'] == 'RECUSADA':
+                                st.markdown("""
+                                    <div style='
+                                        background-color: rgba(198, 40, 40, 0.1);
+                                        padding: 15px;
+                                        border-radius: 8px;
+                                        margin: 10px 0;
+                                        border: 1px solid rgba(198, 40, 40, 0.3);
+                                        box-shadow: 0 2px 4px rgba(198, 40, 40, 0.1);'>
+                                        <p style='
+                                            color: rgb(198, 40, 40);
+                                            font-weight: bold;
+                                            margin-bottom: 5px;
+                                            font-size: 14px;'>
+                                            JUSTIFICATIVA DA RECUSA:
+                                        </p>
+                                        <p style='
+                                            margin: 0;
+                                            color: rgb(198, 40, 40);
+                                            opacity: 0.9;'>
+                                            {}
+                                        </p>
+                                    </div>
+                                """.format(req.get('justificativa_recusa', 'Não informada')), unsafe_allow_html=True)
+
                             # Exibição da observação do comprador
                             if req.get('observacao_geral'):
                                 st.markdown("""
-                                    <div style='background-color: #f0f2f6; border-radius: 4px; padding: 15px; margin: 20px 0 25px 0; border-left: 4px solid #2D2C74;'>
-                                        <p style='color: #2D2C74; font-weight: bold; margin-bottom: 10px;'>OBSERVAÇÕES DO COMPRADOR:</p>
-                                        <p style='margin: 0 0 5px 0;'>{}</p>
+                                    <div style='background-color: var(--background-color);
+                                              border-radius: 4px; 
+                                              padding: 15px; 
+                                              margin: 20px 0 25px 0; 
+                                              border-left: 4px solid #2D2C74;
+                                              border: 1px solid var(--secondary-background-color);'>
+                                        <p style='color: var(--text-color); 
+                                                  font-weight: bold; 
+                                                  margin-bottom: 10px;'>OBSERVAÇÕES DO COMPRADOR:</p>
+                                        <p style='margin: 0 0 5px 0; color: var(--text-color);'>{}</p>
                                     </div>
                                 """.format(req['observacao_geral']), unsafe_allow_html=True)
 
