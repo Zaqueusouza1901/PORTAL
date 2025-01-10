@@ -1285,9 +1285,12 @@ def requisicoes():
                                 <span class="status-badge status-{req['status'].lower()}">{req['status']}</span>
                             </div>
                         </div>
-                        <div class="requisicao-data" style="color: var(--text-color)">
-                            <span>CRIADO EM: {req['data_hora']}</span>
-                            <span>VENDEDOR: {req['vendedor']}</span>
+                        <div class="requisicao-data" style="color: var(--text-color); display: flex; justify-content: space-between;">
+                            <div>
+                                <span>CRIADO EM: {req['data_hora']}</span>
+                                <span>VENDEDOR: {req['vendedor']}</span>
+                            </div>
+                            <span>COMPRADOR: {req.get('comprador_responsavel', '-')}</span>
                         </div>
                     </div>
                 """, unsafe_allow_html=True)
