@@ -48,7 +48,6 @@ inicializar_banco()
 def salvar_requisicao_db(requisicao):
     conn = sqlite3.connect('banco_jetfrio.db')
     cursor = conn.cursor()
-    
     try:
         cursor.execute('''
             INSERT OR REPLACE INTO requisicoes 
@@ -66,7 +65,6 @@ def salvar_requisicao_db(requisicao):
             requisicao.get('observacao_geral'),
             json.dumps(requisicao)
         ))
-        
         conn.commit()
         return True
     except Exception as e:
@@ -1132,12 +1130,18 @@ def nova_requisicao():
                     'status': 'ABERTA',
                     'items': st.session_state.items_temp.copy()
                 }
-                st.session_state.requisicoes.append(nova_requisicao)
-                salvar_requisicao_db()
-                st.session_state.items_temp = []
-                st.success("Requisição enviada com sucesso!")
-                st.session_state['modo_requisicao'] = None
-                st.rerun()
+                
+                # Salva a requisição no banco de dados
+                if salvar_requisicao_db(nova_requisicao):
+                    st.session_state.requisicoes.append(nova_requisicao)
+                    st.session_state.items_temp = []
+                    st.success("Requisição enviada com sucesso!")
+                    st.session_state['modo_requisicao'] = None
+                    st.rerun()
+                else:
+                    st.error("Erro ao salvar a requisição. Tente novamente.")
+                    return
+                
         with col2:
             if st.button("❌ CANCELAR", type="secondary", use_container_width=True):
                 st.session_state.items_temp = []
