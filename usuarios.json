@@ -1,0 +1,56 @@
+{
+    "ZAQUEU SOUZA": {
+        "senha": "Za@031162",
+        "perfil": "administrador",
+        "email": "importacao@jetfrio.com.br",
+        "ativo": true,
+        "primeiro_acesso": false,
+        "permissoes": [
+            "dashboard",
+            "requisicoes",
+            "cotacoes",
+            "importacao",
+            "configuracoes"
+        ]
+    },
+    "DANIELLE FERREIRA": {
+        "senha": null,
+        "perfil": "comprador",
+        "email": "compras3@jetfrio.com.br",
+        "ativo": true,
+        "primeiro_acesso": true,
+        "permissoes": [
+            "dashboard",
+            "requisicoes",
+            "cotacoes",
+            "importacao",
+            "configuracoes"
+        ]
+    },
+    "JACQUELINE ANGIE": {
+        "senha": null,
+        "perfil": "comprador",
+        "email": "compras2@jetfrio.com.br",
+        "ativo": true,
+        "primeiro_acesso": true,
+        "permissoes": [
+            "dashboard",
+            "requisicoes",
+            "cotacoes",
+            "importacao",
+            "configuracoes"
+        ]
+    },
+    "TESTE VENDAS": {
+        "senha": "Za@031162",
+        "perfil": "vendedor",
+        "email": "teste@jetfrio.com.br",
+        "ativo": true,
+        "primeiro_acesso": false,
+        "permissoes": [
+            "dashboard",
+            "requisicoes",
+            "configuracoes"
+        ]
+    }
+}

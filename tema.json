@@ -1,0 +1,19 @@
+{
+    "cores": {
+        "primaria": "#2D2C74",
+        "secundaria": "#1B81C5",
+        "fundo": "#000000",
+        "texto": "#fff8f8",
+        "botoes": "#2D2C74",
+        "campos": "#8a8686"
+    },
+    "fonte": {
+        "familia": "Inter",
+        "tamanho": 16
+    },
+    "layout": {
+        "largura_maxima": 1200,
+        "padding": 2,
+        "raio_borda": 4
+    }
+}
