@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 import json
 import os
@@ -9,6 +9,8 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import plotly.graph_objects as go
+import shutil
+import glob
 
 # Configuração da página
 st.set_page_config(
@@ -275,6 +277,19 @@ def carregar_usuarios():
         print(f"Erro ao carregar usuários: {str(e)}")
         return usuario_padrao
 
+def verificar_sistema():
+    # Verifica diretórios necessários
+    os.makedirs('backup', exist_ok=True)
+    
+    # Verifica arquivo de requisições
+    if not os.path.exists('requisicoes.json'):
+        with open('requisicoes.json', 'w', encoding='utf-8') as f:
+            json.dump([], f)
+    
+    # Verifica integridade e restaura se necessário
+    if not verificar_integridade_json():
+        restaurar_ultimo_backup()
+
 def salvar_usuarios():
     try:
         with open('usuarios.json', 'w', encoding='utf-8') as f:
@@ -287,13 +302,16 @@ def salvar_usuarios():
 def carregar_requisicoes():
     try:
         if os.path.exists('requisicoes.json'):
-            with open('requisicoes.json', 'r', encoding='utf-8') as f:
-                return json.load(f)
-        return []
-    except json.JSONDecodeError:
+            if verificar_integridade_json():
+                with open('requisicoes.json', 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            else:
+                if restaurar_ultimo_backup():
+                    with open('requisicoes.json', 'r', encoding='utf-8') as f:
+                        return json.load(f)
         return []
     except Exception as e:
-        st.error(f"Erro ao carregar requisições: {str(e)}")
+        print(f"Erro ao carregar requisições: {str(e)}")
         return []
 
 def validar_requisicao(requisicao):
@@ -318,26 +336,69 @@ def backup_requisicoes():
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_file = f'backup/requisicoes_backup_{timestamp}.json'
         os.makedirs('backup', exist_ok=True)
-        with open(backup_file, 'w', encoding='utf-8') as f:
-            json.dump(st.session_state.requisicoes, f, ensure_ascii=False, indent=4)
-        return True
+        
+        if os.path.exists('requisicoes.json'):
+            shutil.copy2('requisicoes.json', backup_file)
+            return True
+        return False
     except Exception as e:
-        print(f"Erro ao criar backup: {str(e)}")
-        st.error(f"Erro ao criar backup: {str(e)}")
+        print(f"Erro no backup: {str(e)}")
+        return False
+
+def limpar_backups_antigos(dias_retencao=30):
+    backup_files = glob.glob('backup/requisicoes_backup_*.json')
+    data_limite = datetime.now() - timedelta(days=dias_retencao)
+    
+    for arquivo in backup_files:
+        data_arquivo = datetime.fromtimestamp(os.path.getctime(arquivo))
+        if data_arquivo < data_limite:
+            os.remove(arquivo)
+
+def verificar_integridade_json():
+    try:
+        with open('requisicoes.json', 'r', encoding='utf-8') as f:
+            json.load(f)
+        return True
+    except:
+        return False
+
+def restaurar_ultimo_backup():
+    try:
+        backup_files = glob.glob('backup/requisicoes_backup_*.json')
+        if backup_files:
+            ultimo_backup = max(backup_files, key=os.path.getctime)
+            shutil.copy2(ultimo_backup, 'requisicoes.json')
+            return True
+    except:
         return False
 
 def salvar_requisicao_db():
     try:
-        backup_requisicoes()  # Criar backup antes de salvar
+        # Criar backup antes
+        backup_requisicoes()
+        
+        # Salvar em arquivo temporário primeiro
         temp_file = 'requisicoes_temp.json'
         with open(temp_file, 'w', encoding='utf-8') as f:
             json.dump(st.session_state.requisicoes, f, ensure_ascii=False, indent=4)
+        
+        # Verificar integridade do arquivo temporário
+        with open(temp_file, 'r', encoding='utf-8') as f:
+            json.load(f)
+            
+        # Se passou na verificação, move para arquivo final
         os.replace(temp_file, 'requisicoes.json')
-        print(f"Requisição salva com sucesso - Total: {len(st.session_state.requisicoes)}")
+        
+        # Verifica integridade final
+        if not verificar_integridade_json():
+            raise Exception("Arquivo final corrompido")
+            
         return True
+        
     except Exception as e:
         print(f"Erro ao salvar: {str(e)}")
-        st.error(f"Erro ao salvar requisição: {str(e)}")
+        if restaurar_ultimo_backup():
+            print("Backup restaurado com sucesso")
         return False
 
 def get_data_hora_brasil():
