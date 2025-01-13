@@ -21,7 +21,7 @@
         "perfil": "comprador",
         "email": "compras3@jetfrio.com.br",
         "ativo": true,
-        "primeiro_acesso": true,
+        "primeiro_acesso": false,
         "permissoes": [
             "dashboard",
             "requisicoes",
