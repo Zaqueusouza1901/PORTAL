@@ -92,37 +92,6 @@ def carregar_requisicoes_db():
     finally:
         conn.close()
 
-def salvar_requisicao_db(requisicao):
-    conn = sqlite3.connect('banco_jetfrio.db')
-    cursor = conn.cursor()
-    
-    try:
-        cursor.execute('''
-            INSERT OR REPLACE INTO requisicoes 
-            (numero, cliente, vendedor, data_hora, status, comprador_responsavel, 
-             data_hora_resposta, observacao_geral, dados)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            requisicao['numero'],
-            requisicao['cliente'],
-            requisicao['vendedor'],
-            requisicao['data_hora'],
-            requisicao['status'],
-            requisicao.get('comprador_responsavel'),
-            requisicao.get('data_hora_resposta'),
-            requisicao.get('observacao_geral'),
-            json.dumps(requisicao)
-        ))
-        
-        conn.commit()
-        return True
-    except Exception as e:
-        conn.rollback()
-        st.error(f"Erro ao salvar requisição: {str(e)}")
-        return False
-    finally:
-        conn.close()
-
 def init_notification_js():
     st.components.v1.html("""
         <script>
