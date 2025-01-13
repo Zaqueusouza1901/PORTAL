@@ -1942,9 +1942,6 @@ def configuracoes():
 
 def main():
     init_notification_js()
-    
-    # Adiciona atualização automática a cada 30 segundos
-    st_autorefresh(interval=30000, key="datarefresh")
         
     if 'usuario' not in st.session_state:
         tela_login()
