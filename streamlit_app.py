@@ -1286,9 +1286,12 @@ def requisicoes():
                                 <span class="status-badge status-{req['status'].lower()}">{req['status']}</span>
                             </div>
                         </div>
-                        <div class="requisicao-data" style="color: var(--text-color)">
-                            <span>CRIADO EM: {req['data_hora']}</span>
-                            <span>VENDEDOR: {req['vendedor']}</span>
+                        <div class="requisicao-data" style="color: var(--text-color); display: flex; justify-content: space-between;">
+                            <div>
+                                <span>CRIADO EM: {req['data_hora']}</span>
+                                <span>VENDEDOR: {req['vendedor']}</span>
+                            </div>
+                            <span>COMPRADOR: {req.get('comprador_responsavel', '-')}</span>
                         </div>
                     </div>
                 """, unsafe_allow_html=True)
@@ -1323,7 +1326,7 @@ def requisicoes():
                                     req['status'] = 'EM ANDAMENTO'
                                     req['comprador_responsavel'] = st.session_state['usuario']
                                     req['data_hora_aceite'] = get_data_hora_brasil()
-                                    if salvar_requisicoes():
+                                    if salvar_requisicao_db():
                                         enviar_notificacao(
                                             f"Requisição {req['numero']} Aceita",
                                             f"{st.session_state['usuario']} aceitou a requisição Nº{req['numero']} para o cliente {req['cliente']}",
@@ -1383,7 +1386,7 @@ def requisicoes():
                                     req['data_hora_resposta'] = get_data_hora_brasil()
                                     req['justificativa_recusa'] = justificativa
                                     
-                                    if salvar_requisicoes():
+                                    if salvar_requisicao_db():
                                         try:
                                             enviar_notificacao(
                                                 f"Requisição {req['numero']} Recusada",
@@ -1536,7 +1539,7 @@ def requisicoes():
                                         item['salvo'] = True
                                         if mostrar_obs:
                                             req['observacao_geral'] = observacao_geral
-                                        salvar_requisicoes()
+                                        salvar_requisicao_db()
                                         st.success(f"ITEM {item['item']} SALVO COM SUCESSO!")
                                         st.rerun()
                                 
@@ -1546,7 +1549,7 @@ def requisicoes():
                                         if st.button("✅ FINALIZAR", key=f"finalizar_{req['numero']}", type="primary"):
                                             req['status'] = 'FINALIZADA'
                                             req['data_hora_resposta'] = get_data_hora_brasil()
-                                            if salvar_requisicoes():
+                                            if salvar_requisicao_db():
                                                 enviar_notificacao(
                                                     f"REQUISIÇÃO {req['numero']} FINALIZADA",
                                                     f"{st.session_state['usuario']} finalizou a requisição Nº{req['numero']} para o cliente {req['cliente']}",
