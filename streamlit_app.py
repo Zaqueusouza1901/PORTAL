@@ -2110,6 +2110,10 @@ def main():
        
         menu = menu_lateral()
         
+        if 'requisicoes' not in st.session_state:
+            inicializar_banco()
+            st.session_state.requisicoes = carregar_requisicoes_db()
+        
         if menu == "Dashboard":
             dashboard()
         elif menu == "Requisições":
