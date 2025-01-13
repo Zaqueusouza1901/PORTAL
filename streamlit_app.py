@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
 import time
 from datetime import datetime
 import pytz
@@ -10,7 +9,6 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import plotly.graph_objects as go
-from streamlit_autorefresh import st_autorefresh
 
 # Configuração da página
 st.set_page_config(
@@ -677,13 +675,13 @@ def dashboard():
                     marker=dict(colors=colors),
                     textinfo='value+label',
                     textposition='inside',
-                    textfont_size=13,
+                    textfont_size=12,
                     hoverinfo='label+value+percent',
                     showlegend=True
                 )])
 
                 fig.update_layout(
-                    showlegend=False,
+                    showlegend=True,
                     legend=dict(
                         orientation="h",
                         yanchor="bottom",
@@ -699,7 +697,7 @@ def dashboard():
 
                 fig.update_traces(
                     textposition='inside',
-                    pull=[0.00] * len(dados_grafico)
+                    pull=[0.05] * len(dados_grafico)
                 )
 
                 st.plotly_chart(fig, use_container_width=True)
@@ -710,7 +708,7 @@ def dashboard():
     st.markdown("### Requisições Detalhadas")
     if requisicoes_filtradas:
         df_requisicoes = pd.DataFrame([{
-            'Número': f"{req['numero']}",
+            'Número': f"#{req['numero']}",
             'Data/Hora Criação': req['data_hora'],
             'Cliente': req['cliente'],
             'Vendedor': req['vendedor'],
@@ -771,7 +769,7 @@ def nova_requisicao():
         font-size: 14px;
     }
     .requisicao-table th, .requisicao-table td {
-        border: 2px solid #2D2C74 !important;
+        border: 2px solid #2D2C74;
         padding: 1px !important;
         text-align: center;
         overflow: hidden;
@@ -779,8 +777,6 @@ def nova_requisicao():
         white-space: nowrap;
         font-size: 14px;
         line-height: 2 !important;
-        background-color: var(--background-color);
-        color: var(--text-color);
     }
     .requisicao-table th {
         background-color: white;
@@ -794,18 +790,13 @@ def nova_requisicao():
     }
     .stTextInput > div > div > input {
         border-radius: 4px !important;
-        border: 1px solid var(--secondary-background-color) !important;
+        border: 2px solid #2D2C74 !important;
         padding: 2px 6px !important;
         height: 38px !important;
-        background-color: var(--background-color) !important;
-        color: var(--text-color) !important;
+        background-color: white !important;
         font-size: 14px !important;
         margin: 0 !important;
         min-height: 38px !important;
-    }
-    .stTextInput > div > div > input:focus {
-        border-color: var(--primary-color) !important;
-        box-shadow: 0 0 0 1px var(--primary-color) !important;
     }
     .stTextInput.desc-input > div > div > input {
         text-align: left !important;
@@ -925,11 +916,8 @@ def nova_requisicao():
             with cols[5]:
                 if editing:
                     quantidade = st.text_input("", value=str(item['quantidade']), key=f"qtd_edit_{idx}", label_visibility="collapsed")
-                    try:
-                        quantidade_float = float(quantidade.replace(',', '.'))
-                        item['quantidade'] = quantidade_float
-                    except ValueError:
-                        pass
+                    if quantidade.isdigit():
+                        item['quantidade'] = int(quantidade)
                 else:
                     st.text_input("", value=str(item['quantidade']), disabled=True, key=f"qtd_{idx}", label_visibility="collapsed")
             with cols[6]:
@@ -969,25 +957,23 @@ def nova_requisicao():
             if not descricao:
                 st.session_state['show_desc_error'] = True
                 st.rerun()
+            elif not quantidade or not quantidade.isdigit():
+                st.session_state['show_qtd_error'] = True
+                st.rerun()
             else:
-                try:
-                    qtd = float(quantidade.replace(',', '.'))
-                    novo_item = {
-                        'item': proximo_item,
-                        'codigo': codigo,
-                        'cod_fabricante': cod_fabricante,
-                        'descricao': descricao,
-                        'marca': marca,
-                        'quantidade': qtd,
-                        'status': 'ABERTA'
-                    }
-                    st.session_state.items_temp.append(novo_item)
-                    st.session_state['show_desc_error'] = False
-                    st.session_state['show_qtd_error'] = False
-                    st.rerun()
-                except ValueError:
-                    st.session_state['show_qtd_error'] = True
-                    st.rerun()
+                novo_item = {
+                    'item': proximo_item,
+                    'codigo': codigo,
+                    'cod_fabricante': cod_fabricante,
+                    'descricao': descricao,
+                    'marca': marca,
+                    'quantidade': int(quantidade),
+                    'status': 'ABERTA'
+                }
+                st.session_state.items_temp.append(novo_item)
+                st.session_state['show_desc_error'] = False
+                st.session_state['show_qtd_error'] = False
+                st.rerun()
 
     if st.session_state.items_temp:
         col1, col2 = st.columns(2)
@@ -1957,34 +1943,11 @@ def configuracoes():
 def main():
     init_notification_js()
     
-    # Adiciona atualização automática a cada 30 segundos
-    st_autorefresh(interval=30000, key="datarefresh")
-    
     if 'usuario' not in st.session_state:
         tela_login()
     else:
         solicitar_permissao_notificacao()
-        
-        # Adicione aqui a mensagem fixa
-        col1, col2 = st.columns([3,1])
-        with col2:
-            st.markdown(f"""
-                <div style='
-                    background-color: var(--background-color);
-                    padding: 8px;
-                    border-radius: 4px;
-                    font-size: 12px;
-                    text-align: right;
-                    color: var(--text-color);'>
-                    🔄 Última atualização: {get_data_hora_brasil()}
-                </div>
-            """, unsafe_allow_html=True)
-       
         menu = menu_lateral()
-        
-        if 'requisicoes' not in st.session_state:
-            inicializar_banco()
-            st.session_state.requisicoes = carregar_requisicoes_db()
         
         if menu == "Dashboard":
             dashboard()
