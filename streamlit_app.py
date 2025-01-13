@@ -1102,7 +1102,7 @@ def nova_requisicao():
                 
                 # Salva a requisição no banco de dados
                 if salvar_requisicao_db(nova_requisicao):
-                    st.session_state.requisicoes.append(nova_requisicao)
+                    st.session_state.requisicoes.append(nova_requisicao
                     st.session_state.items_temp = []
                     st.success("Requisição enviada com sucesso!")
                     st.session_state['modo_requisicao'] = None
