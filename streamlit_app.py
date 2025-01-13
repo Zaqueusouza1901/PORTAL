@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import sqlite3
 import time
 from datetime import datetime
 import pytz
@@ -9,6 +10,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import plotly.graph_objects as go
+from streamlit_autorefresh import st_autorefresh
 
 # Configuração da página
 st.set_page_config(
@@ -1952,11 +1954,34 @@ def configuracoes():
 def main():
     init_notification_js()
     
+    # Adiciona atualização automática a cada 30 segundos
+    st_autorefresh(interval=30000, key="datarefresh")
+    
     if 'usuario' not in st.session_state:
         tela_login()
     else:
         solicitar_permissao_notificacao()
+        
+        # Adicione aqui a mensagem fixa
+        col1, col2 = st.columns([3,1])
+        with col2:
+            st.markdown(f"""
+                <div style='
+                    background-color: var(--background-color);
+                    padding: 8px;
+                    border-radius: 4px;
+                    font-size: 12px;
+                    text-align: right;
+                    color: var(--text-color);'>
+                    🔄 Última atualização: {get_data_hora_brasil()}
+                </div>
+            """, unsafe_allow_html=True)
+       
         menu = menu_lateral()
+        
+        if 'requisicoes' not in st.session_state:
+            inicializar_banco()
+            st.session_state.requisicoes = carregar_requisicoes_db()
         
         if menu == "Dashboard":
             dashboard()
