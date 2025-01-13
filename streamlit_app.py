@@ -216,6 +216,27 @@ def save_perfis_permissoes(perfil, permissoes):
         st.error(f"Erro ao salvar permissões: {str(e)}")
         return False
 
+def verificar_diretorios():
+    try:
+        os.makedirs('backup', exist_ok=True)
+        return True
+    except Exception as e:
+        st.error(f"Erro ao criar diretório: {str(e)}")
+        return False
+
+def verificar_arquivos():
+    try:
+        arquivos_necessarios = ['requisicoes.json', 'usuarios.json', 'ultimo_numero.json']
+        for arquivo in arquivos_necessarios:
+            if not os.path.exists(arquivo):
+                with open(arquivo, 'w', encoding='utf-8') as f:
+                    json.dump([] if arquivo == 'requisicoes.json' else {}, f, ensure_ascii=False, indent=4)
+        os.makedirs('backup', exist_ok=True)
+        return True
+    except Exception as e:
+        st.error(f"Erro ao verificar arquivos: {str(e)}")
+        return False
+
 def carregar_usuarios():
     usuario_padrao = {
         'ZAQUEU SOUZA': {
@@ -229,21 +250,20 @@ def carregar_usuarios():
     }
     
     try:
-        # Se o arquivo não existir, cria com usuário padrão
+        verificar_diretorios()  # Verifica e cria diretórios necessários
+        
         if not os.path.exists('usuarios.json'):
             with open('usuarios.json', 'w', encoding='utf-8') as f:
                 json.dump(usuario_padrao, f, ensure_ascii=False, indent=4)
             print("Arquivo usuarios.json criado com usuário padrão")
             return usuario_padrao
 
-        # Lê o arquivo existente
         with open('usuarios.json', 'r', encoding='utf-8') as f:
             usuarios = json.load(f)
             if not usuarios:
                 print("Arquivo vazio, retornando usuário padrão")
                 return usuario_padrao
-                
-            # Garante que o usuário administrador existe
+            
             if 'ZAQUEU SOUZA' not in usuarios:
                 usuarios['ZAQUEU SOUZA'] = usuario_padrao['ZAQUEU SOUZA']
                 with open('usuarios.json', 'w', encoding='utf-8') as f:
@@ -256,22 +276,12 @@ def carregar_usuarios():
         return usuario_padrao
 
 def salvar_usuarios():
-    arquivo_usuarios = 'usuarios.json'
     try:
-        with open(arquivo_usuarios, 'w', encoding='utf-8') as f:
+        with open('usuarios.json', 'w', encoding='utf-8') as f:
             json.dump(st.session_state.usuarios, f, ensure_ascii=False, indent=4)
         return True
     except Exception as e:
         st.error(f"Erro ao salvar usuários: {str(e)}")
-        return False
-
-def salvar_requisicoes():
-    try:
-        with open('requisicoes.json', 'w', encoding='utf-8') as f:
-            json.dump(st.session_state.requisicoes, f, ensure_ascii=False, indent=4)
-        return True
-    except Exception as e:
-        st.error(f"Erro ao salvar requisições: {str(e)}")
         return False
 
 def carregar_requisicoes():
@@ -279,13 +289,56 @@ def carregar_requisicoes():
         if os.path.exists('requisicoes.json'):
             with open('requisicoes.json', 'r', encoding='utf-8') as f:
                 return json.load(f)
-        return []  # Retorna lista vazia se arquivo não existir
-    except json.JSONDecodeError as e:
-        # Arquivo existe mas está corrompido ou vazio
+        return []
+    except json.JSONDecodeError:
         return []
     except Exception as e:
         st.error(f"Erro ao carregar requisições: {str(e)}")
         return []
+
+def validar_requisicao(requisicao):
+    campos_obrigatorios = {
+        'numero': int,
+        'cliente': str,
+        'vendedor': str,
+        'data_hora': str,
+        'status': str,
+        'items': list
+    }
+    try:
+        for campo, tipo in campos_obrigatorios.items():
+            if campo not in requisicao or not isinstance(requisicao[campo], tipo):
+                return False
+        return True
+    except Exception:
+        return False
+
+def backup_requisicoes():
+    try:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_file = f'backup/requisicoes_backup_{timestamp}.json'
+        os.makedirs('backup', exist_ok=True)
+        with open(backup_file, 'w', encoding='utf-8') as f:
+            json.dump(st.session_state.requisicoes, f, ensure_ascii=False, indent=4)
+        return True
+    except Exception as e:
+        print(f"Erro ao criar backup: {str(e)}")
+        st.error(f"Erro ao criar backup: {str(e)}")
+        return False
+
+def salvar_requisicao_db():
+    try:
+        backup_requisicoes()  # Criar backup antes de salvar
+        temp_file = 'requisicoes_temp.json'
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            json.dump(st.session_state.requisicoes, f, ensure_ascii=False, indent=4)
+        os.replace(temp_file, 'requisicoes.json')
+        print(f"Requisição salva com sucesso - Total: {len(st.session_state.requisicoes)}")
+        return True
+    except Exception as e:
+        print(f"Erro ao salvar: {str(e)}")
+        st.error(f"Erro ao salvar requisição: {str(e)}")
+        return False
 
 def get_data_hora_brasil():
     try:
@@ -317,10 +370,6 @@ def enviar_email(destinatario, assunto, mensagem):
         st.error(f"Erro ao enviar email: {str(e)}")
         return False
 
-# Inicialização de dados
-if 'usuarios' not in st.session_state:
-    st.session_state.usuarios = carregar_usuarios()
-
 def get_next_requisition_number():
     try:
         with open('ultimo_numero.json', 'r') as f:
@@ -343,13 +392,14 @@ def inicializar_numero_requisicao():
             json.dump({'numero': 4999}, f)
             return 4999
 
-# Inicialização de dados...
+# Inicialização de dados
 if 'usuarios' not in st.session_state:
     st.session_state.usuarios = carregar_usuarios()
-if not os.path.exists('ultimo_numero.json'):
-    inicializar_numero_requisicao()
-if 'requisicoes' not in st.session_state:
-    st.session_state.requisicoes = carregar_requisicoes()
+    verificar_diretorios()  # Garante que os diretórios necessários existam
+    if not os.path.exists('ultimo_numero.json'):
+        inicializar_numero_requisicao()
+    if 'requisicoes' not in st.session_state:
+        st.session_state.requisicoes = carregar_requisicoes()
 
 def tela_login():
     st.title("PORTAL - JETFRIO")
@@ -1003,7 +1053,7 @@ def nova_requisicao():
                     'items': st.session_state.items_temp.copy()
                 }
                 st.session_state.requisicoes.append(nova_requisicao)
-                salvar_requisicoes()
+                salvar_requisicao_db()
                 st.session_state.items_temp = []
                 st.success("Requisição enviada com sucesso!")
                 st.session_state['modo_requisicao'] = None
