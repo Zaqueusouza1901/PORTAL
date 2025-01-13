@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
 import time
 from datetime import datetime
 import pytz
@@ -10,7 +9,6 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import plotly.graph_objects as go
-from streamlit_autorefresh import st_autorefresh
 
 # Configuração da página
 st.set_page_config(
@@ -18,112 +16,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# Inicialização do banco de dados SQLite
-def inicializar_banco():
-    conn = sqlite3.connect('banco_jetfrio.db')
-    cursor = conn.cursor()
-    
-    # Criar tabela de requisições
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS requisicoes (
-            numero INTEGER PRIMARY KEY,
-            cliente TEXT,
-            vendedor TEXT,
-            data_hora TEXT,
-            status TEXT,
-            comprador_responsavel TEXT,
-            data_hora_resposta TEXT,
-            observacao_geral TEXT,
-            dados JSON
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
-
-# Inicializa o banco de dados ao iniciar a aplicação
-inicializar_banco()
-
-def salvar_requisicao_db(requisicao):
-    conn = sqlite3.connect('banco_jetfrio.db')
-    cursor = conn.cursor()
-    
-    try:
-        cursor.execute('''
-            INSERT OR REPLACE INTO requisicoes 
-            (numero, cliente, vendedor, data_hora, status, comprador_responsavel, 
-             data_hora_resposta, observacao_geral, dados)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            requisicao['numero'],
-            requisicao['cliente'],
-            requisicao['vendedor'],
-            requisicao['data_hora'],
-            requisicao['status'],
-            requisicao.get('comprador_responsavel'),
-            requisicao.get('data_hora_resposta'),
-            requisicao.get('observacao_geral'),
-            json.dumps(requisicao)
-        ))
-        
-        conn.commit()
-        return True
-    except Exception as e:
-        conn.rollback()
-        st.error(f"Erro ao salvar requisição: {str(e)}")
-        return False
-    finally:
-        conn.close()
-
-def carregar_requisicoes_db():
-    conn = sqlite3.connect('banco_jetfrio.db')
-    cursor = conn.cursor()
-    
-    try:
-        cursor.execute('SELECT dados FROM requisicoes')
-        requisicoes = []
-        for row in cursor.fetchall():
-            if row[0]:  # Verifica se dados não é None
-                requisicao = json.loads(row[0])
-                requisicoes.append(requisicao)
-        return requisicoes
-    except Exception as e:
-        st.error(f"Erro ao carregar requisições: {str(e)}")
-        return []
-    finally:
-        conn.close()
-
-def salvar_requisicao_db(requisicao):
-    conn = sqlite3.connect('banco_jetfrio.db')
-    cursor = conn.cursor()
-    
-    try:
-        cursor.execute('''
-            INSERT OR REPLACE INTO requisicoes 
-            (numero, cliente, vendedor, data_hora, status, comprador_responsavel, 
-             data_hora_resposta, observacao_geral, dados)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            requisicao['numero'],
-            requisicao['cliente'],
-            requisicao['vendedor'],
-            requisicao['data_hora'],
-            requisicao['status'],
-            requisicao.get('comprador_responsavel'),
-            requisicao.get('data_hora_resposta'),
-            requisicao.get('observacao_geral'),
-            json.dumps(requisicao)
-        ))
-        
-        conn.commit()
-        return True
-    except Exception as e:
-        conn.rollback()
-        st.error(f"Erro ao salvar requisição: {str(e)}")
-        return False
-    finally:
-        conn.close()
 
 def init_notification_js():
     st.components.v1.html("""
@@ -373,35 +265,14 @@ def salvar_usuarios():
         st.error(f"Erro ao salvar usuários: {str(e)}")
         return False
 
-def salvar_requisicao_db():
-    for requisicao in st.session_state.requisicoes:
-        conn = sqlite3.connect('banco_jetfrio.db')
-        cursor = conn.cursor()
-        try:
-            cursor.execute('''
-                INSERT OR REPLACE INTO requisicoes 
-                (numero, cliente, vendedor, data_hora, status, comprador_responsavel, 
-                 data_hora_resposta, observacao_geral, dados)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                requisicao['numero'],
-                requisicao['cliente'],
-                requisicao['vendedor'],
-                requisicao['data_hora'],
-                requisicao['status'],
-                requisicao.get('comprador_responsavel'),
-                requisicao.get('data_hora_resposta'),
-                requisicao.get('observacao_geral'),
-                json.dumps(requisicao)
-            ))
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
-            st.error(f"Erro ao salvar requisição: {str(e)}")
-            return False
-        finally:
-            conn.close()
-    return True
+def salvar_requisicoes():
+    try:
+        with open('requisicoes.json', 'w', encoding='utf-8') as f:
+            json.dump(st.session_state.requisicoes, f, ensure_ascii=False, indent=4)
+        return True
+    except Exception as e:
+        st.error(f"Erro ao salvar requisições: {str(e)}")
+        return False
 
 def carregar_requisicoes():
     try:
@@ -478,8 +349,7 @@ if 'usuarios' not in st.session_state:
 if not os.path.exists('ultimo_numero.json'):
     inicializar_numero_requisicao()
 if 'requisicoes' not in st.session_state:
-    inicializar_banco()
-    st.session_state.requisicoes = carregar_requisicoes_db()
+    st.session_state.requisicoes = carregar_requisicoes()
 
 def tela_login():
     st.title("PORTAL - JETFRIO")
@@ -497,8 +367,8 @@ def tela_login():
                     confirma_senha = st.text_input("Confirme a Nova Senha", type="password")
                     
                     if st.form_submit_button("Cadastrar Senha"):
-                        if len(nova_senha) < 4:
-                            st.error("A senha deve ter no mínimo 4 caracteres")
+                        if len(nova_senha) < 8:
+                            st.error("A senha deve ter no mínimo 8 caracteres")
                             return
                             
                         if nova_senha != confirma_senha:
@@ -1133,7 +1003,7 @@ def nova_requisicao():
                     'items': st.session_state.items_temp.copy()
                 }
                 st.session_state.requisicoes.append(nova_requisicao)
-                salvar_requisicao_db()
+                salvar_requisicoes()
                 st.session_state.items_temp = []
                 st.success("Requisição enviada com sucesso!")
                 st.session_state['modo_requisicao'] = None
@@ -1414,12 +1284,9 @@ def requisicoes():
                                 <span class="status-badge status-{req['status'].lower()}">{req['status']}</span>
                             </div>
                         </div>
-                        <div class="requisicao-data" style="color: var(--text-color); display: flex; justify-content: space-between;">
-                            <div>
-                                <span>CRIADO EM: {req['data_hora']}</span>
-                                <span>VENDEDOR: {req['vendedor']}</span>
-                            </div>
-                            <span>COMPRADOR: {req.get('comprador_responsavel', '-')}</span>
+                        <div class="requisicao-data" style="color: var(--text-color)">
+                            <span>CRIADO EM: {req['data_hora']}</span>
+                            <span>VENDEDOR: {req['vendedor']}</span>
                         </div>
                     </div>
                 """, unsafe_allow_html=True)
@@ -1454,7 +1321,7 @@ def requisicoes():
                                     req['status'] = 'EM ANDAMENTO'
                                     req['comprador_responsavel'] = st.session_state['usuario']
                                     req['data_hora_aceite'] = get_data_hora_brasil()
-                                    if salvar_requisicao_db():
+                                    if salvar_requisicoes():
                                         enviar_notificacao(
                                             f"Requisição {req['numero']} Aceita",
                                             f"{st.session_state['usuario']} aceitou a requisição Nº{req['numero']} para o cliente {req['cliente']}",
@@ -1514,7 +1381,7 @@ def requisicoes():
                                     req['data_hora_resposta'] = get_data_hora_brasil()
                                     req['justificativa_recusa'] = justificativa
                                     
-                                    if salvar_requisicao_db():
+                                    if salvar_requisicoes():
                                         try:
                                             enviar_notificacao(
                                                 f"Requisição {req['numero']} Recusada",
@@ -1667,7 +1534,7 @@ def requisicoes():
                                         item['salvo'] = True
                                         if mostrar_obs:
                                             req['observacao_geral'] = observacao_geral
-                                        salvar_requisicao_db()
+                                        salvar_requisicoes()
                                         st.success(f"ITEM {item['item']} SALVO COM SUCESSO!")
                                         st.rerun()
                                 
@@ -1677,7 +1544,7 @@ def requisicoes():
                                         if st.button("✅ FINALIZAR", key=f"finalizar_{req['numero']}", type="primary"):
                                             req['status'] = 'FINALIZADA'
                                             req['data_hora_resposta'] = get_data_hora_brasil()
-                                            if salvar_requisicao_db():
+                                            if salvar_requisicoes():
                                                 enviar_notificacao(
                                                     f"REQUISIÇÃO {req['numero']} FINALIZADA",
                                                     f"{st.session_state['usuario']} finalizou a requisição Nº{req['numero']} para o cliente {req['cliente']}",
@@ -2085,34 +1952,11 @@ def configuracoes():
 def main():
     init_notification_js()
     
-    # Adiciona atualização automática a cada 30 segundos
-    st_autorefresh(interval=30000, key="datarefresh")
-    
     if 'usuario' not in st.session_state:
         tela_login()
     else:
         solicitar_permissao_notificacao()
-        
-        # Adicione aqui a mensagem fixa
-        col1, col2 = st.columns([3,1])
-        with col2:
-            st.markdown(f"""
-                <div style='
-                    background-color: var(--background-color);
-                    padding: 8px;
-                    border-radius: 4px;
-                    font-size: 12px;
-                    text-align: right;
-                    color: var(--text-color);'>
-                    🔄 Última atualização: {get_data_hora_brasil()}
-                </div>
-            """, unsafe_allow_html=True)
-       
         menu = menu_lateral()
-        
-        if 'requisicoes' not in st.session_state:
-            inicializar_banco()
-            st.session_state.requisicoes = carregar_requisicoes_db()
         
         if menu == "Dashboard":
             dashboard()
