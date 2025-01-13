@@ -44,7 +44,7 @@
     {
         "numero": 5002,
         "cliente": "EWFEW",
-        "vendedor": "FABIO POPPI",
+        "vendedor": "ZAQUEU SOUZA",
         "data_hora": "16:37:19 - 09/01/2025",
         "status": "RECUSADA",
         "items": [
@@ -65,7 +65,7 @@
     {
         "numero": 5003,
         "cliente": "ERREGE",
-        "vendedor": "ZAQUEU SOUZA",
+        "vendedor": "FABIO POPPI",
         "data_hora": "12:06:55 - 10/01/2025",
         "status": "FINALIZADA",
         "items": [
