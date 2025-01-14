@@ -923,6 +923,9 @@ def dashboard():
     # Tabela detalhada em toda a largura
     st.markdown("### Requisições Detalhadas")
     if requisicoes_filtradas:
+        # Ordenar requisições por número em ordem decrescente
+        requisicoes_filtradas = sorted(requisicoes_filtradas, key=lambda x: x['numero'], reverse=True)
+        
         df_requisicoes = pd.DataFrame([{
             'Número': f"{req['numero']}",
             'Data/Hora Criação': req['data_hora'],
