@@ -891,13 +891,13 @@ def dashboard():
                     marker=dict(colors=colors),
                     textinfo='value+label',
                     textposition='inside',
-                    textfont_size=12,
+                    textfont_size=13,
                     hoverinfo='label+value+percent',
                     showlegend=True
                 )])
 
                 fig.update_layout(
-                    showlegend=True,
+                    showlegend=False,
                     legend=dict(
                         orientation="h",
                         yanchor="bottom",
@@ -913,7 +913,7 @@ def dashboard():
 
                 fig.update_traces(
                     textposition='inside',
-                    pull=[0.05] * len(dados_grafico)
+                    pull=[0.00] * len(dados_grafico)
                 )
 
                 st.plotly_chart(fig, use_container_width=True)
@@ -924,7 +924,7 @@ def dashboard():
     st.markdown("### Requisições Detalhadas")
     if requisicoes_filtradas:
         df_requisicoes = pd.DataFrame([{
-            'Número': f"#{req['numero']}",
+            'Número': f"{req['numero']}",
             'Data/Hora Criação': req['data_hora'],
             'Cliente': req['cliente'],
             'Vendedor': req['vendedor'],
