@@ -6,4 +6,3 @@ pytz==2024.2
 python-dotenv==1.0.0
 email-validator==2.1.0.post1
 streamlit-autorefresh==1.0.1
-extra-streamlit-components==0.1.71
