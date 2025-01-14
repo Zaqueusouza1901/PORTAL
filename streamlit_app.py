@@ -951,6 +951,9 @@ def dashboard():
         st.info("Nenhuma requisição encontrada.")
 
 def nova_requisicao():
+    # Inicializa a variável de observações no início da função
+    observacoes_vendedor = ""
+    
     if st.session_state.get('modo_requisicao') != 'nova':
         st.title("REQUISIÇÕES")
         col1, col2 = st.columns([4,1])
@@ -1229,6 +1232,7 @@ def nova_requisicao():
                 if not cliente:
                     st.error("PREENCHIMENTO OBRIGATÓRIO: CLIENTE")
                     return
+                
                 nova_requisicao = {
                     'numero': get_next_requisition_number(),
                     'cliente': cliente,
@@ -1236,8 +1240,9 @@ def nova_requisicao():
                     'data_hora': get_data_hora_brasil(),
                     'status': 'ABERTA',
                     'items': st.session_state.items_temp.copy(),
-                    'observacoes_vendedor': observacoes_vendedor
+                    'observacoes_vendedor': observacoes_vendedor  # Agora sempre terá um valor
                 }
+                
                 st.session_state.requisicoes.append(nova_requisicao)
                 salvar_requisicao_db()
                 st.session_state.items_temp = []
