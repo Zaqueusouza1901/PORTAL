@@ -12,6 +12,110 @@ import plotly.graph_objects as go
 import shutil
 import glob
 
+EMAIL_CONFIG = {
+    'SMTP_SERVER': 'smtp-mail.outlook.com',
+    'SMTP_PORT': 587,
+    'SMTP_ENCRYPTION': 'STARTTLS',
+    'EMAIL': 'alerta@jetfrio.com.br',
+    'PASSWORD': 'Jet@2007'
+}
+
+def enviar_email_requisicao(requisicao, tipo_notificacao):
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = EMAIL_CONFIG['EMAIL']
+        msg['Subject'] = f"SUA REQUISIÇÃO Nº{requisicao['numero']} FOI {tipo_notificacao.upper()}"
+        
+        # Define destinatários
+        vendedor_email = st.session_state.usuarios[requisicao['vendedor']]['email']
+        comprador_email = st.session_state.usuarios.get(requisicao.get('comprador_responsavel', ''), {}).get('email', '')
+        
+        msg['To'] = vendedor_email
+        if comprador_email:
+            msg['Cc'] = comprador_email
+        
+        # Cria tabela HTML dos itens
+        html = f"""
+        <html>
+            <body>
+                <h2>Requisição #{requisicao['numero']}</h2>
+                <p><strong>Cliente:</strong> {requisicao['cliente']}</p>
+                <p><strong>Status:</strong> {requisicao['status']}</p>
+                
+                <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 10px 0;">
+                    <p><strong>Criado por:</strong> {requisicao['vendedor']}</p>
+                    <p><strong>Data/Hora Criação:</strong> {requisicao['data_hora']}</p>
+                    <p><strong>Respondido por:</strong> {requisicao.get('comprador_responsavel', '-')}</p>
+                    <p><strong>Data/Hora Resposta:</strong> {requisicao.get('data_hora_resposta', '-')}</p>
+                </div>
+
+                <table border="1" style="border-collapse: collapse; width: 100%;">
+                    <tr>
+                        <th>Item</th>
+                        <th>Código</th>
+                        <th>Descrição</th>
+                        <th>Marca</th>
+                        <th>Qtd</th>
+                        <th>Valor Unit.</th>
+                        <th>Total</th>
+                        <th>Prazo</th>
+                    </tr>
+        """
+        
+        for item in requisicao['items']:
+            html += f"""
+                <tr>
+                    <td>{item['item']}</td>
+                    <td>{item['codigo']}</td>
+                    <td>{item['descricao']}</td>
+                    <td>{item['marca']}</td>
+                    <td>{item['quantidade']}</td>
+                    <td>R$ {item.get('venda_unit', 0):.2f}</td>
+                    <td>R$ {item.get('venda_unit', 0) * item['quantidade']:.2f}</td>
+                    <td>{item.get('prazo_entrega', '-')}</td>
+                </tr>
+            """
+        
+        html += """
+                </table>
+        """
+
+        # Adiciona observações se existirem
+        if requisicao.get('observacao_geral'):
+            html += f"""
+                <div style="margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-left: 4px solid #2D2C74;">
+                    <h3 style="margin-top: 0; color: #2D2C74;">Observações do Comprador:</h3>
+                    <p style="margin-bottom: 0;">{requisicao['observacao_geral']}</p>
+                </div>
+            """
+
+        # Adiciona justificativa de recusa se existir
+        if tipo_notificacao.upper() == 'RECUSADA' and requisicao.get('justificativa_recusa'):
+            html += f"""
+                <div style="margin-top: 20px; padding: 15px; background-color: #ffebee; border-left: 4px solid #c62828;">
+                    <h3 style="margin-top: 0; color: #c62828;">Justificativa da Recusa:</h3>
+                    <p style="margin-bottom: 0;">{requisicao['justificativa_recusa']}</p>
+                </div>
+            """
+
+        html += """
+            </body>
+        </html>
+        """
+        
+        msg.attach(MIMEText(html, 'html'))
+        
+        # Envia o email
+        with smtplib.SMTP(EMAIL_CONFIG['SMTP_SERVER'], EMAIL_CONFIG['SMTP_PORT']) as server:
+            server.starttls()
+            server.login(EMAIL_CONFIG['EMAIL'], EMAIL_CONFIG['PASSWORD'])
+            server.send_message(msg)
+        
+        return True
+    except Exception as e:
+        st.error(f"Erro ao enviar email: {str(e)}")
+        return False
+
 # Configuração da página
 st.set_page_config(
     page_title="PORTAL - JETFRIO",
@@ -864,6 +968,13 @@ def nova_requisicao():
     with col2:
         st.write(f"**VENDEDOR:** {st.session_state.get('usuario', '')}")
 
+    col1, col2 = st.columns(2)
+    with col2:
+        if st.button("❌ CANCELAR", type="secondary", use_container_width=True):
+            st.session_state.items_temp = []
+            st.session_state['modo_requisicao'] = None
+            st.rerun()
+
     if st.session_state.get('show_qtd_error'):
         st.markdown('<p style="color: #ff4b4b; margin: 0; padding: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">PREENCHIMENTO OBRIGATÓRIO: QUANTIDADE</p>', unsafe_allow_html=True)
 
@@ -1099,6 +1210,18 @@ def nova_requisicao():
                     st.rerun()
 
     if st.session_state.items_temp:
+        # Checkbox para mostrar campo de observações
+        mostrar_obs = st.checkbox("INCLUIR OBSERVAÇÕES")
+        
+        # Campo de observações só aparece se o checkbox estiver marcado
+        if mostrar_obs:
+            st.markdown("### OBSERVAÇÕES")
+            observacoes_vendedor = st.text_area(
+                "Insira suas observações aqui",
+                key="observacoes_vendedor",
+                height=100
+            )
+
         col1, col2 = st.columns(2)
         with col1:
             if st.button("✅ ENVIAR", type="primary", use_container_width=True):
@@ -1111,17 +1234,13 @@ def nova_requisicao():
                     'vendedor': st.session_state['usuario'],
                     'data_hora': get_data_hora_brasil(),
                     'status': 'ABERTA',
-                    'items': st.session_state.items_temp.copy()
+                    'items': st.session_state.items_temp.copy(),
+                    'observacoes_vendedor': observacoes_vendedor
                 }
                 st.session_state.requisicoes.append(nova_requisicao)
                 salvar_requisicao_db()
                 st.session_state.items_temp = []
                 st.success("Requisição enviada com sucesso!")
-                st.session_state['modo_requisicao'] = None
-                st.rerun()
-        with col2:
-            if st.button("❌ CANCELAR", type="secondary", use_container_width=True):
-                st.session_state.items_temp = []
                 st.session_state['modo_requisicao'] = None
                 st.rerun()
 
@@ -1150,7 +1269,7 @@ def requisicoes():
         .filtros-container {
             background-color: white;
             padding: 0px;
-            border-radius: 8px;
+            border-radius: 4px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             margin-bottom: 12px;
         }
@@ -1217,7 +1336,7 @@ def requisicoes():
         .header-info {
             display: flex;
             justify-content: space-between;
-            padding: 8px;
+            padding: 0px;
             background-color: white;
             border-bottom: 1px solid #eee;
             margin-bottom: 0;
@@ -1227,7 +1346,7 @@ def requisicoes():
             padding: 0 8px;
         }
         .header-group p {
-            margin: 3px 0;
+            margin: 0px 0;
             color: #444;
         }
         .requisicao-table {
@@ -1273,23 +1392,23 @@ def requisicoes():
             text-align: right; 
         }
         .action-buttons {
-            padding: 10px;
+            padding: 1px;
             background-color: white;
             border-top: 1px solid #eee;
-            margin-top: 3px;
+            margin-top: 0px;
             display: flex;
             justify-content: space-between;
             gap: 10px;
         }
         .input-container {
             background-color: white;
-            padding: 10px;
+            padding: 0px;
             border-radius: 8px;
             margin-top: 1px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
         .observacao-geral {
-            margin-top: 15px;
+            margin-top: 10px;
             padding: 10px;
             background-color: #f8f9fa;
             border-radius: 8px;
@@ -1542,6 +1661,22 @@ def requisicoes():
                                 }
                             )
 
+                            # Exibição das observações do vendedor
+                            if req.get('observacoes_vendedor'):
+                                st.markdown("""
+                                    <div style='background-color: var(--background-color);
+                                              border-radius: 4px; 
+                                              padding: 10px; 
+                                              margin: 10px 0 0px 0; 
+                                              border-left: 4px solid #1B81C5;
+                                              border: 1px solid var(--secondary-background-color);'>
+                                        <p style='color: var(--text-color); 
+                                                  font-weight: bold; 
+                                                  margin-bottom: 10px;'>OBSERVAÇÕES DO VENDEDOR:</p>
+                                        <p style='margin: 0 0 5px 0; color: var(--text-color);'>{}</p>
+                                    </div>
+                                """.format(req['observacoes_vendedor']), unsafe_allow_html=True)
+
                             # Exibição da justificativa de recusa
                             if req['status'] == 'RECUSADA':
                                 st.markdown("""
@@ -1659,6 +1794,7 @@ def requisicoes():
                                             req['status'] = 'FINALIZADA'
                                             req['data_hora_resposta'] = get_data_hora_brasil()
                                             if salvar_requisicao_db():
+                                                enviar_email_requisicao(req, "finalizada")
                                                 enviar_notificacao(
                                                     f"REQUISIÇÃO {req['numero']} FINALIZADA",
                                                     f"{st.session_state['usuario']} finalizou a requisição Nº{req['numero']} para o cliente {req['cliente']}",
