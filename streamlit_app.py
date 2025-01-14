@@ -1515,7 +1515,7 @@ def requisicoes():
                         color: var(--text-color)">
                         <div class="requisicao-info" style="color: var(--text-color)">
                             <div>
-                                <span class="requisicao-numero" style="color: var(--text-color)">#</span>
+                                <span class="requisicao-numero" style="color: var(--text-color)"></span>
                                 <span class="requisicao-numero" style="color: var(--text-color)">{req['numero']}</span>
                                 <span class="requisicao-cliente" style="color: var(--text-color)">{req['cliente']}</span>
                             </div>
