@@ -11,6 +11,7 @@ from email.mime.multipart import MIMEMultipart
 import plotly.graph_objects as go
 import shutil
 import glob
+from streamlit_autorefresh import st_autorefresh
 
 EMAIL_CONFIG = {
     'SMTP_SERVER': 'smtp-mail.outlook.com',
@@ -1258,11 +1259,11 @@ def requisicoes():
     if 'ultima_atualizacao' not in st.session_state:
         st.session_state.ultima_atualizacao = time.time()
     
-    if time.time() - st.session_state.ultima_atualizacao > 30:
+    if time.time() - st.session_state.ultima_atualizacao > 60:
         st.session_state.requisicoes = carregar_requisicoes()
         st.session_state.ultima_atualizacao = time.time()
         st.rerun()
-    
+
     # Estilização
     st.markdown("""
         <style>
@@ -2201,11 +2202,30 @@ def configuracoes():
 
 def main():
     init_notification_js()
-        
+    
+    # Adiciona atualização automática a cada 30 segundos
+    st_autorefresh(interval=30000, key="datarefresh")
+    
     if 'usuario' not in st.session_state:
         tela_login()
     else:
         solicitar_permissao_notificacao()
+        
+        # Adicione aqui a mensagem fixa
+        col1, col2 = st.columns([3,1])
+        with col2:
+            st.markdown(f"""
+                <div style='
+                    background-color: var(--background-color);
+                    padding: 8px;
+                    border-radius: 4px;
+                    font-size: 12px;
+                    text-align: right;
+                    color: var(--text-color);'>
+                    🔄 Última atualização: {get_data_hora_brasil()}
+                </div>
+            """, unsafe_allow_html=True)
+       
         menu = menu_lateral()
         
         if menu == "Dashboard":
