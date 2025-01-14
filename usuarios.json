@@ -235,5 +235,27 @@
             "requisicoes",
             "configuracoes"
         ]
-    }
-}
+    },
+    "MARCIO MOREIRA": {
+        "senha": null,
+        "perfil": "vendedor",
+        "email": "marcio.moreira@jetfrio.com.br",
+        "ativo": true,
+        "primeiro_acesso": true,
+        "permissoes": [
+            "dashboard",
+            "requisicoes",
+            "configuracoes"
+        ]
+    },
+    "CAIO KELLER SANTOS": {
+        "senha": null,
+        "perfil": "vendedor",
+        "email": "caio@jetfrio.com.br",
+        "ativo": true,
+        "primeiro_acesso": true,
+        "permissoes": [
+            "dashboard",
+            "requisicoes",
+            "configuracoes"
+        ]
