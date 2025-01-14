@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import time
+import extra_streamlit_components as stx
 from datetime import datetime, timedelta
 import pytz
 import json
@@ -12,6 +13,38 @@ import plotly.graph_objects as go
 import shutil
 import glob
 from streamlit_autorefresh import st_autorefresh
+
+# Configuração da página
+st.set_page_config(
+    page_title="PORTAL - JETFRIO",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Inicialização global do CookieManager com chave única
+cookie_manager = stx.CookieManager(key="global_cookie_manager")
+
+def set_auth_cookie(username):
+    global cookie_manager
+    cookie_manager.set('auth_status', username, expires_at=datetime.now() + timedelta(days=365))
+
+def check_auth_cookie():
+    global cookie_manager
+    auth_status = cookie_manager.get('auth_status')
+    if auth_status:
+        user_data = st.session_state.usuarios.get(auth_status)
+        if user_data:
+            st.session_state['usuario'] = auth_status
+            st.session_state['perfil'] = user_data['perfil']
+            return True
+    return False
+
+def logout():
+    global cookie_manager
+    cookie_manager.delete('auth_status')
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    st.rerun()
 
 EMAIL_CONFIG = {
     'SMTP_SERVER': 'smtp-mail.outlook.com',
@@ -116,13 +149,6 @@ def enviar_email_requisicao(requisicao, tipo_notificacao):
     except Exception as e:
         st.error(f"Erro ao enviar email: {str(e)}")
         return False
-
-# Configuração da página
-st.set_page_config(
-    page_title="PORTAL - JETFRIO",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 def init_notification_js():
     st.components.v1.html("""
@@ -569,13 +595,13 @@ if 'usuarios' not in st.session_state:
 
 def tela_login():
     st.title("PORTAL - JETFRIO")
-    usuario = st.text_input("Usuário", key="usuario_input").upper()
+    usuario = st.text_input("Usuário", key="login_usuario_input").upper()
     
     if usuario:
         if usuario in st.session_state.usuarios:
             user_data = st.session_state.usuarios[usuario]
             
-            if user_data.get('primeiro_acesso', True):
+            if user_data.get('primeiro_acesso', False) or user_data.get('senha') is None:
                 st.markdown("### 😊 Primeiro Acesso - Configure sua senha")
                 with st.form("primeiro_acesso_form"):
                     nova_senha = st.text_input("Nova Senha", type="password", 
@@ -591,18 +617,18 @@ def tela_login():
                             st.error("As senhas não coincidem")
                             return
                             
-                        st.session_state.usuarios[usuario]['senha'] = nova_senha
-                        st.session_state.usuarios[usuario]['primeiro_acesso'] = False
+                        user_data['senha'] = nova_senha
+                        user_data['primeiro_acesso'] = False
                         salvar_usuarios()
                         st.success("Senha cadastrada com sucesso!")
                         time.sleep(1)
                         st.rerun()
             else:
-                senha = st.text_input("Senha", type="password", key="senha_input")
+                senha = st.text_input("Senha", type="password", key="login_senha_input")
                 col1, col2 = st.columns([1, 1])
                 
                 with col1:
-                    if st.button("Entrar", use_container_width=True):
+                    if st.button("Entrar", use_container_width=True, key="btn_entrar"):
                         if not user_data.get('ativo', True):
                             st.error("USUÁRIO INATIVO - CONTATE O ADMINISTRADOR")
                             return
@@ -618,7 +644,7 @@ def tela_login():
                         st.rerun()
                 
                 with col2:
-                    if st.button("Esqueci a Senha", use_container_width=True):
+                    if st.button("Esqueci a Senha", use_container_width=True, key="btn_esqueci_senha"):
                         st.session_state['modo_login'] = 'recuperar_senha'
                         st.session_state['temp_usuario'] = usuario
                         st.rerun()
@@ -627,8 +653,8 @@ def tela_login():
 
     if st.session_state.get('modo_login') == 'recuperar_senha':
         st.markdown("### 🔑 Recuperação de Senha")
-        with st.form("recuperar_senha_form"):
-            email = st.text_input("Digite seu email cadastrado")
+        with st.form("recuperar_senha_form", clear_on_submit=True):
+            email = st.text_input("Digite seu email cadastrado", key="recuperacao_email")
             
             if st.form_submit_button("Verificar Email"):
                 if not email:
@@ -645,7 +671,7 @@ def tela_login():
 
     elif st.session_state.get('modo_login') == 'redefinir_senha':
         st.markdown("### 🔐 Nova Senha")
-        with st.form("redefinir_senha_form"):
+        with st.form("redefinir_senha_form", clear_on_submit=True):
             nova_senha = st.text_input("Nova Senha", type="password",
                 help="Mínimo 8 caracteres, incluindo letra maiúscula, minúscula e número")
             confirma_senha = st.text_input("Confirme a Nova Senha", type="password")
@@ -935,18 +961,18 @@ def dashboard():
             'Comprador': req.get('comprador_responsavel', '-'),
             'Data/Hora Resposta': req.get('data_hora_resposta', '-')
         } for req in requisicoes_filtradas])
-        
+                
         st.dataframe(
             df_requisicoes,
             hide_index=True,
             use_container_width=True,
             column_config={
-                'Número': st.column_config.TextColumn('Número', width='small'),
+                'Número': st.column_config.TextColumn('Número', width='short'),
                 'Cliente': st.column_config.TextColumn('Cliente', width='medium'),
                 'Vendedor': st.column_config.TextColumn('Vendedor', width='medium'),
                 'Data/Hora Criação': st.column_config.TextColumn('Data/Hora Criação', width='medium'),
-                'Status': st.column_config.TextColumn('Status', width='small'),
-                'Comprador': st.column_config.TextColumn('Comprador', width='medium'),
+                'Status': st.column_config.TextColumn('Status', width='medium'),
+                'Comprador': st.column_config.TextColumn('Comprador', width='big'),
                 'Data/Hora Resposta': st.column_config.TextColumn('Data/Hora Resposta', width='medium')
             }
         )
@@ -2211,29 +2237,12 @@ def configuracoes():
 def main():
     init_notification_js()
     
-    # Adiciona atualização automática a cada 30 segundos
     st_autorefresh(interval=30000, key="datarefresh")
     
     if 'usuario' not in st.session_state:
         tela_login()
     else:
         solicitar_permissao_notificacao()
-        
-        # Adicione aqui a mensagem fixa
-        col1, col2 = st.columns([3,1])
-        with col2:
-            st.markdown(f"""
-                <div style='
-                    background-color: var(--background-color);
-                    padding: 8px;
-                    border-radius: 4px;
-                    font-size: 12px;
-                    text-align: right;
-                    color: var(--text-color);'>
-                    🔄 Última atualização: {get_data_hora_brasil()}
-                </div>
-            """, unsafe_allow_html=True)
-       
         menu = menu_lateral()
         
         if menu == "Dashboard":
