@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import time
-import extra_streamlit_components as stx
 from datetime import datetime, timedelta
 import pytz
 import json
@@ -13,28 +12,6 @@ import plotly.graph_objects as go
 import shutil
 import glob
 from streamlit_autorefresh import st_autorefresh
-
-def set_auth_cookie(username):
-    cookie_manager = stx.CookieManager()
-    cookie_manager.set('auth_status', username, expires_at=datetime.now() + timedelta(days=30))
-
-def check_auth_cookie():
-    cookie_manager = stx.CookieManager()
-    auth_status = cookie_manager.get('auth_status')
-    if auth_status:
-        user_data = st.session_state.usuarios.get(auth_status)
-        if user_data:
-            st.session_state['usuario'] = auth_status
-            st.session_state['perfil'] = user_data['perfil']
-            return True
-    return False
-
-def logout():
-    cookie_manager = stx.CookieManager()
-    cookie_manager.delete('auth_status')
-    for key in list(st.session_state.keys()):
-        del st.session_state[key]
-    st.rerun()
 
 EMAIL_CONFIG = {
     'SMTP_SERVER': 'smtp-mail.outlook.com',
@@ -591,17 +568,7 @@ if 'usuarios' not in st.session_state:
         st.session_state.requisicoes = carregar_requisicoes()
 
 def tela_login():
-    # Verificar cookie existente primeiro
-    cookie_manager = stx.CookieManager()
-    auth_status = cookie_manager.get('auth_status')
-    
-    if auth_status and auth_status in st.session_state.usuarios:
-        user_data = st.session_state.usuarios[auth_status]
-        if user_data.get('ativo', True):
-            st.session_state['usuario'] = auth_status
-            st.session_state['perfil'] = user_data['perfil']
-            return
-    
+    st.title("PORTAL - JETFRIO")
     usuario = st.text_input("Usuário", key="usuario_input").upper()
     
     if usuario:
@@ -646,10 +613,6 @@ def tela_login():
                             
                         st.session_state['usuario'] = usuario
                         st.session_state['perfil'] = user_data['perfil']
-                        
-                        # Criar cookie de autenticação
-                        cookie_manager.set('auth_status', usuario, expires_at=datetime.now() + timedelta(days=30))
-                        
                         st.success(f"Bem-vindo, {usuario}!")
                         time.sleep(1)
                         st.rerun()
@@ -969,18 +932,18 @@ def dashboard():
             'Comprador': req.get('comprador_responsavel', '-'),
             'Data/Hora Resposta': req.get('data_hora_resposta', '-')
         } for req in requisicoes_filtradas])
-                
+        
         st.dataframe(
             df_requisicoes,
             hide_index=True,
             use_container_width=True,
             column_config={
-                'Número': st.column_config.TextColumn('Número', width='short'),
+                'Número': st.column_config.TextColumn('Número', width='small'),
                 'Cliente': st.column_config.TextColumn('Cliente', width='medium'),
                 'Vendedor': st.column_config.TextColumn('Vendedor', width='medium'),
                 'Data/Hora Criação': st.column_config.TextColumn('Data/Hora Criação', width='medium'),
-                'Status': st.column_config.TextColumn('Status', width='medium'),
-                'Comprador': st.column_config.TextColumn('Comprador', width='big'),
+                'Status': st.column_config.TextColumn('Status', width='small'),
+                'Comprador': st.column_config.TextColumn('Comprador', width='medium'),
                 'Data/Hora Resposta': st.column_config.TextColumn('Data/Hora Resposta', width='medium')
             }
         )
@@ -2245,25 +2208,29 @@ def configuracoes():
 def main():
     init_notification_js()
     
+    # Adiciona atualização automática a cada 30 segundos
     st_autorefresh(interval=30000, key="datarefresh")
-    
-    # Verificar cookie antes de mostrar tela de login
-    if 'usuario' not in st.session_state:
-        cookie_manager = stx.CookieManager()
-        auth_status = cookie_manager.get('auth_status')
-        
-        if auth_status and auth_status in st.session_state.usuarios:
-            user_data = st.session_state.usuarios[auth_status]
-            if user_data.get('ativo', True):
-                st.session_state['usuario'] = auth_status
-                st.session_state['perfil'] = user_data['perfil']
-            else:
-                cookie_manager.delete('auth_status')
     
     if 'usuario' not in st.session_state:
         tela_login()
     else:
         solicitar_permissao_notificacao()
+        
+        # Adicione aqui a mensagem fixa
+        col1, col2 = st.columns([3,1])
+        with col2:
+            st.markdown(f"""
+                <div style='
+                    background-color: var(--background-color);
+                    padding: 8px;
+                    border-radius: 4px;
+                    font-size: 12px;
+                    text-align: right;
+                    color: var(--text-color);'>
+                    🔄 Última atualização: {get_data_hora_brasil()}
+                </div>
+            """, unsafe_allow_html=True)
+       
         menu = menu_lateral()
         
         if menu == "Dashboard":
