@@ -448,15 +448,32 @@ def verificar_sistema():
 
 def salvar_usuarios():
     try:
+        backup_file = 'usuarios.json.bak'
+        # Fazer backup do arquivo atual
+        if os.path.exists('usuarios.json'):
+            shutil.copy2('usuarios.json', backup_file)
+            
+        # Salvar os dados
         with open('usuarios.json', 'w', encoding='utf-8') as f:
-            # Convertemos as senhas para string antes de salvar
             usuarios_para_salvar = {
                 usuario: {**dados, 'senha': str(dados['senha'])} 
                 for usuario, dados in st.session_state.usuarios.items()
             }
             json.dump(usuarios_para_salvar, f, ensure_ascii=False, indent=4)
+            
+        # Verificar integridade
+        with open('usuarios.json', 'r', encoding='utf-8') as f:
+            json.load(f)  # Tenta ler o arquivo para verificar se está válido
+            
+        # Remove backup se tudo deu certo
+        if os.path.exists(backup_file):
+            os.remove(backup_file)
+            
         return True
     except Exception as e:
+        # Restaura backup em caso de erro
+        if os.path.exists(backup_file):
+            shutil.copy2(backup_file, 'usuarios.json')
         st.error(f"Erro ao salvar usuários: {str(e)}")
         return False
 
