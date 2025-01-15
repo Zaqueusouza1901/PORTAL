@@ -580,7 +580,7 @@ def tela_login():
         if usuario in st.session_state.usuarios:
             user_data = st.session_state.usuarios[usuario]
             
-            if user_data.get('primeiro_acesso', True):
+            if user_data.get('primeiro_acesso', True) or user_data.get('senha') is None:
                 st.markdown("### 😊 Primeiro Acesso - Configure sua senha")
                 with st.form("primeiro_acesso_form"):
                     nova_senha = st.text_input("Nova Senha", type="password", 
@@ -621,58 +621,6 @@ def tela_login():
                         st.success(f"Bem-vindo, {usuario}!")
                         time.sleep(1)
                         st.rerun()
-                
-                with col2:
-                    if st.button("Esqueci a Senha", use_container_width=True):
-                        st.session_state['modo_login'] = 'recuperar_senha'
-                        st.session_state['temp_usuario'] = usuario
-                        st.rerun()
-        else:
-            st.error("Usuário não encontrado no sistema")
-
-    if st.session_state.get('modo_login') == 'recuperar_senha':
-        st.markdown("### 🔑 Recuperação de Senha")
-        with st.form("recuperar_senha_form"):
-            email = st.text_input("Digite seu email cadastrado")
-            
-            if st.form_submit_button("Verificar Email"):
-                if not email:
-                    st.error("Digite seu email")
-                    return
-                    
-                usuario = st.session_state.get('temp_usuario')
-                if (usuario in st.session_state.usuarios and 
-                    st.session_state.usuarios[usuario]['email'].lower() == email.lower()):
-                    st.session_state['modo_login'] = 'redefinir_senha'
-                    st.rerun()
-                else:
-                    st.error("Email não corresponde ao cadastrado")
-
-    elif st.session_state.get('modo_login') == 'redefinir_senha':
-        st.markdown("### 🔐 Nova Senha")
-        with st.form("redefinir_senha_form"):
-            nova_senha = st.text_input("Nova Senha", type="password",
-                help="Mínimo 8 caracteres, incluindo letra maiúscula, minúscula e número")
-            confirma_senha = st.text_input("Confirme a Nova Senha", type="password")
-            
-            if st.form_submit_button("Redefinir Senha"):
-                if len(nova_senha) < 8:
-                    st.error("A senha deve ter no mínimo 8 caracteres")
-                    return
-                    
-                if nova_senha != confirma_senha:
-                    st.error("As senhas não coincidem")
-                    return
-                    
-                usuario = st.session_state['temp_usuario']
-                st.session_state.usuarios[usuario]['senha'] = nova_senha
-                st.session_state.usuarios[usuario]['primeiro_acesso'] = False
-                salvar_usuarios()
-                st.success("Senha redefinida com sucesso!")
-                time.sleep(1)
-                st.session_state.pop('modo_login')
-                st.session_state.pop('temp_usuario')
-                st.rerun()
 
 def menu_lateral():
     with st.sidebar:
