@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import time
+import zipfile
+import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 import pytz
 import json
@@ -12,6 +14,55 @@ import plotly.graph_objects as go
 import shutil
 import glob
 from streamlit_autorefresh import st_autorefresh
+
+def mostrar_espaco_armazenamento():
+    import plotly.graph_objects as go
+    import os
+    import glob
+    
+    # Calcula o espaço usado pelos backups
+    backup_files = glob.glob('backup/*')
+    espaco_usado = sum(os.path.getsize(f) for f in backup_files) / (1024 * 1024)  # Converte para MB
+    
+    # Define o espaço total (exemplo: 1000 MB)
+    espaco_total = 1000  # MB
+    espaco_disponivel = espaco_total - espaco_usado
+    
+    # Cria o gráfico de rosca
+    fig = go.Figure(data=[go.Pie(
+        labels=['Disponível', 'Usado'],
+        values=[espaco_disponivel, espaco_usado],
+        hole=.7,
+        marker_colors=['#66b3ff', '#ff9999'],
+        textinfo='percent',
+        textfont_size=20,
+        showlegend=True
+    )])
+    
+    # Atualiza o layout
+    fig.update_layout(
+        title=dict(
+            text="Espaço de Armazenamento",
+            y=0.95,
+            x=0.5,
+            xanchor='center',
+            yanchor='top',
+            font=dict(size=16)
+        ),
+        annotations=[dict(
+            text=f'{espaco_usado:.1f}MB<br>de {espaco_total}MB',
+            x=0.5,
+            y=0.5,
+            font_size=14,
+            showarrow=False
+        )],
+        height=300,
+        margin=dict(t=50, l=0, r=0, b=0),
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)'
+    )
+    
+    return fig
 
 EMAIL_CONFIG = {
     'SMTP_SERVER': 'smtp-mail.outlook.com',
@@ -472,15 +523,48 @@ def verificar_integridade_json():
     except:
         return False
 
-def restaurar_ultimo_backup():
+def backup_automatico(dados):
+    backup_dir = 'backup/'
+    if not os.path.exists(backup_dir):
+        os.makedirs(backup_dir)
+    
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    arquivos_backup = {
+        'usuarios': 'usuarios.json',
+        'perfis': 'perfis.json',
+        'requisicoes': 'requisicoes.json',
+        'ultimo_numero': 'ultimo_numero.json'
+    }
+    
+    backup_file = os.path.join(backup_dir, f'backup_{timestamp}.zip')
+    
     try:
-        backup_files = glob.glob('backup/requisicoes_backup_*.json')
-        if backup_files:
-            ultimo_backup = max(backup_files, key=os.path.getctime)
-            shutil.copy2(ultimo_backup, 'requisicoes.json')
+        with zipfile.ZipFile(backup_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for nome, arquivo in arquivos_backup.items():
+                if os.path.exists(arquivo):
+                    zipf.write(arquivo)
+        
+        return backup_file, os.path.getsize(backup_file)
+    except Exception as e:
+        st.error(f"Erro ao realizar backup: {str(e)}")
+        return None, 0
+
+def restaurar_ultimo_backup():
+    backup_dir = 'backup/'
+    backups = [f for f in os.listdir(backup_dir) if f.endswith('.zip')]
+    if backups:
+        ultimo_backup = sorted(backups)[-1]
+        backup_path = os.path.join(backup_dir, ultimo_backup)
+        
+        try:
+            with zipfile.ZipFile(backup_path, 'r') as zipf:
+                zipf.extractall()
             return True
-    except:
-        return False
+        except Exception as e:
+            st.error(f"Erro ao restaurar backup: {str(e)}")
+            return False
+    return False
+
 
 def salvar_requisicao_db():
     try:
@@ -2061,9 +2145,55 @@ def configuracoes():
         
         # Se for administrador, mostra todas as abas
         if st.session_state['perfil'] == 'administrador':
-            tab1, tab2 = st.tabs(["📊 Monitoramento", "⚙️ Personalizar"])
+            tab1, tab2, tab3 = st.tabs(["📊 Monitoramento", "📁 Backup", "⚙️ Personalizar"])
             
             with tab1:
+                st.markdown("#### Monitoramento do Sistema")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("##### Desempenho do Sistema")
+                    
+                    # Gráfico de manômetro para desempenho
+                    import plotly.graph_objects as go
+                    
+                    fig = go.Figure(go.Indicator(
+                        mode = "gauge+number+delta",
+                        value = 75,
+                        domain = {'x': [0, 1], 'y': [0, 1]},
+                        title = {'text': "Desempenho"},
+                        number = {'suffix': "%"},
+                        gauge = {
+                            'axis': {'range': [None, 100]},
+                            'bar': {'color': "rgba(0,0,0,0)"},
+                            'steps': [
+                                {'range': [0, 50], 'color': "red"},
+                                {'range': [50, 75], 'color': "yellow"},
+                                {'range': [75, 100], 'color': "green"}
+                            ],
+                            'threshold': {
+                                'line': {'color': "red", 'width': 4},
+                                'thickness': 0.75,
+                                'value': 90
+                            }
+                        }
+                    ))
+                    
+                    st.plotly_chart(fig)
+                
+                with col2:
+                    st.markdown("##### Armazenamento de Backup")
+                    fig = mostrar_espaco_armazenamento()
+                    st.plotly_chart(fig)
+                
+                st.markdown("#### Logs de Erros")
+                with st.expander("Visualizar Logs"):
+                    logs = ["Erro 1: Falha na conexão", "Erro 2: Timeout", "Erro 3: Dados inválidos"]
+                    for log in logs:
+                        st.text(log)
+            
+            with tab2:
                 st.markdown("#### Configurações de Backup")
                 col1, col2 = st.columns(2)
                 
@@ -2076,19 +2206,32 @@ def configuracoes():
                 with col2:
                     st.markdown("##### Último Backup")
                     st.info(f"Data: {get_data_hora_brasil()}")
-                    st.info("Tamanho: 2.5 MB")
-                    
-                    col_download1, col_download2 = st.columns([3,1])
-                    with col_download1:
-                        formato_backup = st.selectbox("Formato", ["TXT", "Python"])
-                    with col_download2:
-                        st.markdown("<br>", unsafe_allow_html=True)
-                        st.button("⬇️", help="Download do backup")
                 
-                if st.button("🔄 Forçar Backup Agora", type="primary"):
-                    st.success("Backup iniciado manualmente!")
+                col_backup1, col_backup2 = st.columns(2)
+                with col_backup1:
+                    if st.button("🔄 Forçar Backup Agora", type="primary"):
+                        backup_file, backup_size = backup_automatico(st.session_state)
+                        if backup_file:
+                            st.success(f"Backup realizado com sucesso! Tamanho: {backup_size/1024:.2f} KB")
+                        else:
+                            st.error("Falha ao realizar o backup.")
+                
+                with col_backup2:
+                    if st.button("⬇️ Download Backup (ZIP)", type="primary"):
+                        backup_file, _ = backup_automatico(st.session_state)
+                        if backup_file:
+                            with open(backup_file, "rb") as f:
+                                bytes_data = f.read()
+                            st.download_button(
+                                label="Download ZIP",
+                                data=bytes_data,
+                                file_name="backup_sistema.zip",
+                                mime="application/zip"
+                            )
+                        else:
+                            st.error("Falha ao gerar o arquivo de backup.")
             
-            with tab2:
+            with tab3:
                 st.markdown("#### Personalização do Sistema")
                 col1, col2, col3 = st.columns(3)
                 
