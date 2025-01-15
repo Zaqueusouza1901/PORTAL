@@ -2061,109 +2061,61 @@ def configuracoes():
         
         # Se for administrador, mostra todas as abas
         if st.session_state['perfil'] == 'administrador':
-            tab1, tab2, tab3, tab4 = st.tabs(["🔔 Notificações", "🎨 Cores", "📝 Fontes", "📐 Layout"])
+            tab1, tab2 = st.tabs(["📊 Monitoramento", "⚙️ Personalizar"])
             
             with tab1:
-                configurar_notificacoes()
+                st.markdown("#### Configurações de Backup")
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("##### Frequência de Backup")
+                    backup_diario = st.toggle("Backup Diário", value=st.session_state.get('backup_diario', False))
+                    backup_semanal = st.toggle("Backup Semanal", value=st.session_state.get('backup_semanal', False))
+                    backup_mensal = st.toggle("Backup Mensal", value=st.session_state.get('backup_mensal', False))
+                
+                with col2:
+                    st.markdown("##### Último Backup")
+                    st.info(f"Data: {get_data_hora_brasil()}")
+                    st.info("Tamanho: 2.5 MB")
+                    
+                    col_download1, col_download2 = st.columns([3,1])
+                    with col_download1:
+                        formato_backup = st.selectbox("Formato", ["TXT", "Python"])
+                    with col_download2:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        st.button("⬇️", help="Download do backup")
+                
+                if st.button("🔄 Forçar Backup Agora", type="primary"):
+                    st.success("Backup iniciado manualmente!")
             
             with tab2:
-                st.markdown("#### Cores do Sistema")
+                st.markdown("#### Personalização do Sistema")
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
                     cor_primaria = st.color_picker("Primária", "#2D2C74", key="cor_primaria")
                     cor_texto = st.color_picker("Texto", "#000000", key="cor_texto")
+                    familia_fonte = st.selectbox("Fonte", ["Inter", "Roboto", "Open Sans", "Lato", "Montserrat"])
                 with col2:
                     cor_secundaria = st.color_picker("Secundária", "#1B81C5", key="cor_secundaria")
                     cor_botoes = st.color_picker("Botões", "#2D2C74", key="cor_botoes")
+                    tamanho_fonte = st.number_input("Tamanho Base", min_value=12, max_value=20, value=16)
                 with col3:
                     cor_fundo = st.color_picker("Fundo", "#f8f9fa", key="cor_fundo")
                     cor_campos = st.color_picker("Campos", "#ffffff", key="cor_campos")
+                    raio_borda = st.number_input("Raio da Borda", min_value=0, max_value=20, value=4)
 
                 st.markdown("#### Preview")
                 preview_html = f"""
                     <div style="padding: 20px; border-radius: 10px; background-color: {cor_fundo};">
-                        <h4 style="color: {cor_texto};">Exemplo de Visualização</h4>
-                        <button style="background-color: {cor_botoes}; color: white; padding: 10px; border: none; border-radius: 5px; margin: 5px;">Botão</button>
-                        <input type="text" placeholder="Campo de texto" style="background-color: {cor_campos}; border: 1px solid {cor_secundaria}; padding: 5px; margin: 5px;">
+                        <h4 style="color: {cor_texto}; font-family: {familia_fonte};">Exemplo de Visualização</h4>
+                        <button style="background-color: {cor_botoes}; color: white; padding: 10px; border: none; border-radius: {raio_borda}px; margin: 5px;">Botão</button>
+                        <input type="text" placeholder="Campo de texto" style="background-color: {cor_campos}; border: 1px solid {cor_secundaria}; padding: 5px; margin: 5px; border-radius: {raio_borda}px;">
                     </div>
                 """
                 st.markdown(preview_html, unsafe_allow_html=True)
 
-            with tab3:
-                col1, col2 = st.columns(2)
-                with col1:
-                    familia_fonte = st.selectbox(
-                        "Fonte",
-                        ["Inter", "Roboto", "Open Sans", "Lato", "Montserrat"]
-                    )
-                    tamanho_fonte = st.number_input("Tamanho Base", min_value=12, max_value=20, value=16)
-                
-                with col2:
-                    st.markdown("#### Preview da Fonte")
-                    preview_font_html = f"""
-                        <div style="font-family: {familia_fonte}; font-size: {tamanho_fonte}px;">
-                            <p>Exemplo de texto com a fonte {familia_fonte}<br>
-                            ABCDEFGHIJKLMNOPQRSTUVWXYZ<br>
-                            abcdefghijklmnopqrstuvwxyz<br>
-                            0123456789</p>
-                        </div>
-                    """
-                    st.markdown(preview_font_html, unsafe_allow_html=True)
-
-            with tab4:
-                col1, col2 = st.columns(2)
-                with col1:
-                    largura_maxima = st.number_input("Largura Máxima", min_value=800, max_value=1600, value=1200, step=100)
-                    padding = st.number_input("Espaçamento", min_value=1, max_value=5, value=2)
-                    raio_borda = st.number_input("Raio da Borda", min_value=0, max_value=20, value=4)
-                
-                with col2:
-                    st.markdown("#### Preview do Layout")
-                    preview_layout = f"""
-                        <div style="max-width: {largura_maxima}px; padding: {padding * 10}px; background-color: {cor_fundo}; border-radius: {raio_borda}px;">
-                            <div style="background-color: {cor_secundaria}; padding: 10px; border-radius: {raio_borda}px; margin-bottom: 10px;">
-                                Elemento 1
-                            </div>
-                            <div style="background-color: {cor_secundaria}; padding: 10px; border-radius: {raio_borda}px;">
-                                Elemento 2
-                            </div>
-                        </div>
-                    """
-                    st.markdown(preview_layout, unsafe_allow_html=True)
-
-            if st.button("💾 Salvar Configurações de Tema", type="primary"):
-                tema = {
-                    'cores': {
-                        'primaria': cor_primaria,
-                        'secundaria': cor_secundaria,
-                        'fundo': cor_fundo,
-                        'texto': cor_texto,
-                        'botoes': cor_botoes,
-                        'campos': cor_campos
-                    },
-                    'fonte': {
-                        'familia': familia_fonte,
-                        'tamanho': tamanho_fonte
-                    },
-                    'layout': {
-                        'largura_maxima': largura_maxima,
-                        'padding': padding,
-                        'raio_borda': raio_borda
-                    }
-                }
-                save_tema(tema)
-                st.success("Configurações de tema atualizadas com sucesso!")
-                st.rerun()
-        else:
-            # Para vendedores e compradores, mostra apenas notificações
-            tab1 = st.tabs(["🔔 Notificações"])[0]
-            with tab1:
-                configurar_notificacoes()
-
 def main():
-    init_notification_js()
-    
     # Adiciona atualização automática a cada 120 segundos
     st_autorefresh(interval=1200000, key="datarefresh")
     
