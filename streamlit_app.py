@@ -1915,7 +1915,7 @@ def configuracoes():
     st.title("Configurações")
     
     # Menu principal apenas para administradores
-    if st.session_state['perfil'] == 'administrador':
+    if st.session_state['perfil'] in ['administrador', 'comprador']:
         col1, col2, col3 = st.columns(3)
         with col1:
             if st.button("👥 Usuários", type="primary", use_container_width=True):
