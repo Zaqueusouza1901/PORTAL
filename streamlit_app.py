@@ -398,7 +398,12 @@ def verificar_sistema():
 def salvar_usuarios():
     try:
         with open('usuarios.json', 'w', encoding='utf-8') as f:
-            json.dump(st.session_state.usuarios, f, ensure_ascii=False, indent=4)
+            # Convertemos as senhas para string antes de salvar
+            usuarios_para_salvar = {
+                usuario: {**dados, 'senha': str(dados['senha'])} 
+                for usuario, dados in st.session_state.usuarios.items()
+            }
+            json.dump(usuarios_para_salvar, f, ensure_ascii=False, indent=4)
         return True
     except Exception as e:
         st.error(f"Erro ao salvar usuários: {str(e)}")
@@ -2211,8 +2216,8 @@ def configuracoes():
 def main():
     init_notification_js()
     
-    # Adiciona atualização automática a cada 30 segundos
-    st_autorefresh(interval=30000, key="datarefresh")
+    # Adiciona atualização automática a cada 120 segundos
+    st_autorefresh(interval=1200000, key="datarefresh")
     
     if 'usuario' not in st.session_state:
         tela_login()
