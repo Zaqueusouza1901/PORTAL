@@ -1935,7 +1935,7 @@ def configuracoes():
         st.session_state['config_modo'] = 'sistema'
 
     # Seção de Usuários (apenas para administradores)
-    if st.session_state.get('config_modo') == 'usuarios' and st.session_state['perfil'] == 'administrador':
+    if st.session_state.get('config_modo') == 'usuarios' and st.session_state['perfil'] == 'administrador','comprador':
         st.markdown("""
             <style>
             .stButton > button {
