@@ -1684,6 +1684,7 @@ def requisicoes():
                                                 f"{st.session_state['usuario']} recusou a requisição Nº{req['numero']} para o cliente {req['cliente']}. Justificativa: {justificativa}",
                                                 req['numero']
                                             )
+                                            enviar_email_requisicao(req, "recusada")
                                             st.success("Requisição recusada com sucesso!")
                                             st.rerun()
                                         except Exception as e:
