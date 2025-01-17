@@ -21,7 +21,7 @@
         "perfil": "comprador",
         "email": "compras3@jetfrio.com.br",
         "ativo": true,
-        "primeiro_acesso": false,
+        "primeiro_acesso": true,
         "permissoes": [
             "dashboard",
             "requisicoes",
@@ -35,7 +35,7 @@
         "perfil": "comprador",
         "email": "compras2@jetfrio.com.br",
         "ativo": true,
-        "primeiro_acesso": false,
+        "primeiro_acesso": true,
         "permissoes": [
             "dashboard",
             "requisicoes",
@@ -49,7 +49,7 @@
         "perfil": "vendedor",
         "email": "caio@jetfrio.com.br",
         "ativo": true,
-        "primeiro_acesso": false,
+        "primeiro_acesso": true,
         "permissoes": [
             "dashboard",
             "requisicoes",
@@ -85,7 +85,7 @@
         "perfil": "vendedor",
         "email": "antonio@jetfrio.com.br",
         "ativo": true,
-        "primeiro_acesso": false,
+        "primeiro_acesso": true,
         "permissoes": [
             "dashboard",
             "requisicoes",
@@ -97,7 +97,7 @@
         "perfil": "vendedor",
         "email": "raphael@jetfrio.com.br",
         "ativo": true,
-        "primeiro_acesso": false,
+        "primeiro_acesso": true,
         "permissoes": [
             "dashboard",
             "requisicoes",
@@ -109,7 +109,7 @@
         "perfil": "vendedor",
         "email": "sergio.souza@jetfrio.com.br",
         "ativo": true,
-        "primeiro_acesso": false,
+        "primeiro_acesso": true,
         "permissoes": [
             "dashboard",
             "requisicoes",
@@ -121,7 +121,7 @@
         "perfil": "vendedor",
         "email": "fabiopopi@jetfrio.com.br",
         "ativo": true,
-        "primeiro_acesso": false,
+        "primeiro_acesso": true,
         "permissoes": [
             "dashboard",
             "requisicoes",
@@ -133,7 +133,7 @@
         "perfil": "vendedor",
         "email": "fabio@jetfrio.com.br",
         "ativo": true,
-        "primeiro_acesso": false,
+        "primeiro_acesso": true,
         "permissoes": [
             "dashboard",
             "requisicoes",
@@ -145,7 +145,7 @@
         "perfil": "vendedor",
         "email": "gabriel@jetfrio.com.br",
         "ativo": true,
-        "primeiro_acesso": false,
+        "primeiro_acesso": true,
         "permissoes": [
             "dashboard",
             "requisicoes",
@@ -157,7 +157,7 @@
         "perfil": "vendedor",
         "email": "juarez@jetfrio.com.br",
         "ativo": true,
-        "primeiro_acesso": false,
+        "primeiro_acesso": true,
         "permissoes": [
             "dashboard",
             "requisicoes",
@@ -169,7 +169,7 @@
         "perfil": "vendedor",
         "email": "roberto.soares@jetfrio.com.br",
         "ativo": true,
-        "primeiro_acesso": false,
+        "primeiro_acesso": true,
         "permissoes": [
             "dashboard",
             "requisicoes",
@@ -181,7 +181,7 @@
         "perfil": "vendedor",
         "email": "eduardo.bocchini@jetfrio.com.br",
         "ativo": true,
-        "primeiro_acesso": false,
+        "primeiro_acesso": true,
         "permissoes": [
             "dashboard",
             "requisicoes",
@@ -193,7 +193,7 @@
         "perfil": "vendedor",
         "email": "alex@jetfrio.com.br",
         "ativo": true,
-        "primeiro_acesso": false,
+        "primeiro_acesso": true,
         "permissoes": [
             "dashboard",
             "requisicoes",
@@ -205,7 +205,7 @@
         "perfil": "vendedor",
         "email": "claudino.ramos@jetfrio.com.br",
         "ativo": true,
-        "primeiro_acesso": false,
+        "primeiro_acesso": true,
         "permissoes": [
             "dashboard",
             "requisicoes",
@@ -217,7 +217,7 @@
         "perfil": "vendedor",
         "email": "varlei@jetfrio.com.br",
         "ativo": true,
-        "primeiro_acesso": false,
+        "primeiro_acesso": true,
         "permissoes": [
             "dashboard",
             "requisicoes",
@@ -229,7 +229,7 @@
         "perfil": "vendedor",
         "email": "lucas@jetfrio.com.br",
         "ativo": true,
-        "primeiro_acesso": false,
+        "primeiro_acesso": true,
         "permissoes": [
             "dashboard",
             "requisicoes",
@@ -241,7 +241,7 @@
         "perfil": "vendedor",
         "email": "caio@jetfrio.com.br",
         "ativo": true,
-        "primeiro_acesso": false,
+        "primeiro_acesso": true,
         "permissoes": [
             "dashboard",
             "requisicoes",
@@ -253,7 +253,7 @@
         "perfil": "vendedor",
         "email": "marcio.moreira@jetfrio.com.br",
         "ativo": true,
-        "primeiro_acesso": false,
+        "primeiro_acesso": true,
         "permissoes": [
             "dashboard",
             "requisicoes",
