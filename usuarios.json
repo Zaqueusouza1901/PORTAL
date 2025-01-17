@@ -61,7 +61,7 @@
         "perfil": "vendedor",
         "email": "caroline.victorio@jetfrio.com.br",
         "ativo": true,
-        "primeiro_acesso": false,
+        "primeiro_acesso": true,
         "permissoes": [
             "dashboard",
             "requisicoes",
