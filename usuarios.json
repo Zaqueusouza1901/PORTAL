@@ -72,7 +72,7 @@
         "senha": null,
         "perfil": "vendedor",
         "email": "daniel@jetfrio.com.br",
-        "ativo": false,
+        "ativo": true,
         "primeiro_acesso": true,
         "permissoes": [
             "dashboard",
