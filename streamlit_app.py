@@ -614,70 +614,29 @@ def restaurar_ultimo_backup():
     return False
 
 def salvar_requisicao(requisicao):
-    try:
-        # Primeiro faz backup do arquivo atual
-        if os.path.exists('requisicoes.json'):
-            shutil.copy2('requisicoes.json', 'requisicoes.json.bak')
-        
-        # Carrega requisições existentes
-        requisicoes = []
-        try:
-            with open('requisicoes.json', 'r', encoding='utf-8') as f:
-                requisicoes = json.load(f)
-        except FileNotFoundError:
-            requisicoes = []
-        
-        # Atualiza ou adiciona a nova requisição
-        requisicao_existente = False
-        for i, req in enumerate(requisicoes):
-            if req['numero'] == requisicao['numero']:
-                requisicoes[i] = requisicao
-                requisicao_existente = True
-                break
-        
-        if not requisicao_existente:
-            requisicoes.append(requisicao)
-        
-        # Salva no arquivo JSON
-        with open('requisicoes.json', 'w', encoding='utf-8') as f:
-            json.dump(requisicoes, f, ensure_ascii=False, indent=4)
-        
-        # Salva no SQLite
-        conn = sqlite3.connect('requisicoes.db')
-        cursor = conn.cursor()
-        cursor.execute('''
-        INSERT OR REPLACE INTO requisicoes 
-        (numero, cliente, vendedor, data_hora, status, items, observacoes_vendedor, 
-        comprador_responsavel, data_hora_resposta, justificativa_recusa, observacao_geral)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            requisicao['numero'],
-            requisicao['cliente'],
-            requisicao['vendedor'],
-            requisicao['data_hora'],
-            requisicao['status'],
-            json.dumps(requisicao['items']),
-            requisicao.get('observacoes_vendedor', ''),
-            requisicao.get('comprador_responsavel', ''),
-            requisicao.get('data_hora_resposta', ''),
-            requisicao.get('justificativa_recusa', ''),
-            requisicao.get('observacao_geral', '')
-        ))
-        conn.commit()
-        conn.close()
-        
-        # Remove backup se tudo deu certo
-        if os.path.exists('requisicoes.json.bak'):
-            os.remove('requisicoes.json.bak')
-        
-        return True
-        
-    except Exception as e:
-        # Restaura backup em caso de erro
-        if os.path.exists('requisicoes.json.bak'):
-            shutil.copy2('requisicoes.json.bak', 'requisicoes.json')
-        st.error(f"Erro ao salvar requisição: {str(e)}")
-        return False
+    conn = sqlite3.connect('requisicoes.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+    INSERT OR REPLACE INTO requisicoes 
+    (numero, cliente, vendedor, data_hora, status, items, observacoes_vendedor, 
+    comprador_responsavel, data_hora_resposta, justificativa_recusa, observacao_geral)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        requisicao['numero'],
+        requisicao['cliente'],
+        requisicao['vendedor'],
+        requisicao['data_hora'],
+        requisicao['status'],
+        json.dumps(requisicao['items']),
+        requisicao.get('observacoes_vendedor', ''),
+        requisicao.get('comprador_responsavel', ''),
+        requisicao.get('data_hora_resposta', ''),
+        requisicao.get('justificativa_recusa', ''),
+        requisicao.get('observacao_geral', '')
+    ))
+    conn.commit()
+    conn.close()
+    return True
 
 def get_data_hora_brasil():
     try:
