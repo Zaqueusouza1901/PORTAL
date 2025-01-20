@@ -2294,6 +2294,10 @@ def configuracoes():
                     st.warning("Diretório de backup não encontrado.")
 
 def main():
+
+    # Inicializar o banco de dados
+    inicializar_banco()
+    
     # Adiciona atualização automática a cada 120 segundos
     st_autorefresh(interval=1200000, key="datarefresh")
     
