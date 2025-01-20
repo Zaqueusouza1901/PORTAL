@@ -2238,15 +2238,12 @@ def main():
         if renumerar_requisicoes():
             st.success("Renumeração concluída com sucesso")
     
-    # Renumerar requisições
-    renumerar_requisicoes()
-    
     # Adiciona atualização automática a cada 120 segundos
     st_autorefresh(interval=1200000, key="datarefresh")
     
     if 'usuario' not in st.session_state:
         tela_login()
-        
+    else:
         # Adicione aqui a mensagem fixa
         col1, col2 = st.columns([3,1])
         with col2:
@@ -2261,7 +2258,7 @@ def main():
                     🔄 Última atualização: {get_data_hora_brasil()}
                 </div>
             """, unsafe_allow_html=True)
-       
+        
         menu = menu_lateral()
         
         if menu == "Dashboard":
@@ -2276,6 +2273,3 @@ def main():
             st.info("Funcionalidade em desenvolvimento")
         elif menu == "Configurações":
             configuracoes()
-
-if __name__ == "__main__":
-    main()
