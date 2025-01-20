@@ -640,7 +640,7 @@ def salvar_requisicao(requisicao):
         
         # Salva no arquivo JSON
         with open('requisicoes.json', 'w', encoding='utf-8') as f:
-            json.dump([], f, ensure_ascii=False, indent=4)
+            json.dump(requisicoes, f, ensure_ascii=False, indent=4)
         
         # Salva no SQLite
         conn = sqlite3.connect('requisicoes.db')
