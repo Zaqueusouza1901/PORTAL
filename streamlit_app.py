@@ -502,6 +502,49 @@ def salvar_usuarios():
             shutil.copy2(backup_file, 'usuarios.json')
         st.error(f"Erro ao salvar usuários: {str(e)}")
         return False
+
+def migrar_dados_json_para_sqlite():
+    try:
+        with open('requisicoes.json', 'r', encoding='utf-8') as f:
+            requisicoes_json = json.load(f)
+        
+        conn = sqlite3.connect('requisicoes.db')
+        cursor = conn.cursor()
+        
+        for req in requisicoes_json:
+            cursor.execute('''
+                INSERT OR REPLACE INTO requisicoes 
+                (numero, cliente, vendedor, data_hora, status, items, 
+                observacoes_vendedor, comprador_responsavel, data_hora_resposta,
+                justificativa_recusa, observacao_geral)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                req['REQUISIÇÃO'],
+                req['CLIENTE'],
+                req['VENDEDOR'],
+                req['Data/Hora Criação:'],
+                req['STATUS'],
+                json.dumps([{
+                    'codigo': req['CÓDIGO'],
+                    'descricao': req['DESCRIÇÃO'],
+                    'marca': req['MARCA'],
+                    'quantidade': req['QUANTIDADE'],
+                    'venda_unit': req[' R$ UNIT '].replace('R$ ', '').replace(',', '.').strip(),
+                    'prazo_entrega': req['PRAZO']
+                }]),
+                '',
+                req['COMPRADOR'],
+                req['Data/Hora Resposta:'],
+                '',
+                req['OBSERVAÇÕES DO COMPRADOR']
+            ))
+        
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Erro na migração: {str(e)}")
+        return False
     
 def carregar_requisicoes():
     try:
