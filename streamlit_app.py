@@ -2339,9 +2339,14 @@ def configuracoes():
                     st.warning("Diretório de backup não encontrado.")
 
 def main():
-
     # Inicializar o banco de dados
     inicializar_banco()
+    
+    # Migrar dados do JSON para SQLite
+    migrar_dados_json_para_sqlite()
+    
+    # Renumerar requisições
+    renumerar_requisicoes()
     
     # Adiciona atualização automática a cada 120 segundos
     st_autorefresh(interval=1200000, key="datarefresh")
