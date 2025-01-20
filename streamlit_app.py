@@ -17,25 +17,29 @@ import glob
 from streamlit_autorefresh import st_autorefresh
 
 def inicializar_banco():
-    conn = sqlite3.connect('requisicoes.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS requisicoes (
-        numero INTEGER PRIMARY KEY,
-        cliente TEXT,
-        vendedor TEXT,
-        data_hora TEXT,
-        status TEXT,
-        items TEXT,
-        observacoes_vendedor TEXT,
-        comprador_responsavel TEXT,
-        data_hora_resposta TEXT,
-        justificativa_recusa TEXT,
-        observacao_geral TEXT
-    )
-    ''')
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect('requisicoes.db')
+        cursor = conn.cursor()
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS requisicoes (
+            numero INTEGER PRIMARY KEY,
+            cliente TEXT,
+            vendedor TEXT,
+            data_hora TEXT,
+            status TEXT,
+            items TEXT,
+            observacoes_vendedor TEXT,
+            comprador_responsavel TEXT,
+            data_hora_resposta TEXT,
+            justificativa_recusa TEXT,
+            observacao_geral TEXT
+        )
+        ''')
+        conn.commit()
+        conn.close()
+        print("Banco de dados inicializado com sucesso")
+    except Exception as e:
+        print(f"Erro ao inicializar banco de dados: {str(e)}")
 
 def mostrar_espaco_armazenamento():
     import plotly.graph_objects as go
@@ -500,44 +504,35 @@ def salvar_usuarios():
         return False
     
 def carregar_requisicoes():
-    conn = sqlite3.connect('requisicoes.db')
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM requisicoes')
-    requisicoes = []
-    for row in cursor.fetchall():
-        requisicao = {
-            'numero': row[0],
-            'cliente': row[1],
-            'vendedor': row[2],
-            'data_hora': row[3],
-            'status': row[4],
-            'items': json.loads(row[5]),
-            'observacoes_vendedor': row[6],
-            'comprador_responsavel': row[7],
-            'data_hora_resposta': row[8],
-            'justificativa_recusa': row[9],
-            'observacao_geral': row[10]
-        }
-        requisicoes.append(requisicao)
-    conn.close()
-    return requisicoes
-
-def validar_requisicao(requisicao):
-    campos_obrigatorios = {
-        'numero': int,
-        'cliente': str,
-        'vendedor': str,
-        'data_hora': str,
-        'status': str,
-        'items': list
-    }
     try:
-        for campo, tipo in campos_obrigatorios.items():
-            if campo not in requisicao or not isinstance(requisicao[campo], tipo):
-                return False
-        return True
-    except Exception:
-        return False
+        conn = sqlite3.connect('requisicoes.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM requisicoes')
+        requisicoes = []
+        for row in cursor.fetchall():
+            requisicao = {
+                'numero': row[0],
+                'cliente': row[1],
+                'vendedor': row[2],
+                'data_hora': row[3],
+                'status': row[4],
+                'items': json.loads(row[5]),
+                'observacoes_vendedor': row[6],
+                'comprador_responsavel': row[7],
+                'data_hora_resposta': row[8],
+                'justificativa_recusa': row[9],
+                'observacao_geral': row[10]
+            }
+            requisicoes.append(requisicao)
+        conn.close()
+        return requisicoes
+    except sqlite3.OperationalError:
+        # Se a tabela não existir, inicializa o banco e tenta novamente
+        inicializar_banco()
+        return carregar_requisicoes()
+    except Exception as e:
+        st.error(f"Erro ao carregar requisições: {str(e)}")
+        return []
 
 def backup_requisicoes():
     try:
