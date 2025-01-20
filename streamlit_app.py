@@ -505,12 +505,6 @@ def salvar_usuarios():
     
 def carregar_requisicoes():
     try:
-        with open('requisicoes.json', 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception as e:
-        st.error(f"Erro ao carregar requisições: {str(e)}")
-        return []
-    try:
         conn = sqlite3.connect('requisicoes.db')
         cursor = conn.cursor()
         cursor.execute('SELECT * FROM requisicoes')
@@ -525,17 +519,11 @@ def carregar_requisicoes():
                 'items': json.loads(row[5]),
                 'observacoes_vendedor': row[6],
                 'comprador_responsavel': row[7],
-                'data_hora_resposta': row[8],
-                'justificativa_recusa': row[9],
-                'observacao_geral': row[10]
+                'data_hora_resposta': row[8]
             }
             requisicoes.append(requisicao)
         conn.close()
         return requisicoes
-    except sqlite3.OperationalError:
-        # Se a tabela não existir, inicializa o banco e tenta novamente
-        inicializar_banco()
-        return carregar_requisicoes()
     except Exception as e:
         st.error(f"Erro ao carregar requisições: {str(e)}")
         return []
@@ -1330,9 +1318,6 @@ def nova_requisicao():
                 
                 if salvar_requisicao(nova_req):
                     st.session_state.requisicoes = carregar_requisicoes()
-                    st.session_state.items_temp = []
-                    st.success("Requisição enviada com sucesso!")
-                    st.session_state['modo_requisicao'] = None
                     st.rerun()
 
 def salvar_configuracoes():
