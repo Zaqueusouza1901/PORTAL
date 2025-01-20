@@ -505,6 +505,11 @@ def salvar_usuarios():
     
 def carregar_requisicoes():
     try:
+        with open('requisicoes.json', 'r') as arquivo:
+            return json.load(arquivo)
+    except FileNotFoundError:
+        return []
+    try:
         conn = sqlite3.connect('requisicoes.db')
         cursor = conn.cursor()
         cursor.execute('SELECT * FROM requisicoes')
@@ -533,6 +538,27 @@ def carregar_requisicoes():
     except Exception as e:
         st.error(f"Erro ao carregar requisições: {str(e)}")
         return []
+
+def salvar_requisicoes(requisicoes):
+    with open('requisicoes.json', 'w') as arquivo:
+        json.dump(requisicoes, arquivo, indent=4)
+        
+def criar_requisicao(dados_requisicao):
+    requisicoes = carregar_requisicoes()
+    
+    nova_requisicao = {
+        "numero": dados_requisicao["numero"],
+        "data": dados_requisicao["data"],
+        "solicitante": dados_requisicao["solicitante"],
+        "departamento": dados_requisicao["departamento"],
+        "itens": dados_requisicao["itens"],
+        "custos": dados_requisicao["custos"],
+        "preco_venda": dados_requisicao["preco_venda"]
+    }
+    
+    requisicoes.append(nova_requisicao)
+    salvar_requisicoes(requisicoes)
+    return nova_requisicao
 
 def backup_requisicoes():
     try:
