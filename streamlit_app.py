@@ -1,4 +1,5 @@
 import streamlit as st
+import sqlite3
 import pandas as pd
 import time
 import zipfile
@@ -14,6 +15,27 @@ import plotly.graph_objects as go
 import shutil
 import glob
 from streamlit_autorefresh import st_autorefresh
+
+def inicializar_banco():
+    conn = sqlite3.connect('requisicoes.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS requisicoes (
+        numero INTEGER PRIMARY KEY,
+        cliente TEXT,
+        vendedor TEXT,
+        data_hora TEXT,
+        status TEXT,
+        items TEXT,
+        observacoes_vendedor TEXT,
+        comprador_responsavel TEXT,
+        data_hora_resposta TEXT,
+        justificativa_recusa TEXT,
+        observacao_geral TEXT
+    )
+    ''')
+    conn.commit()
+    conn.close()
 
 def mostrar_espaco_armazenamento():
     import plotly.graph_objects as go
@@ -476,21 +498,29 @@ def salvar_usuarios():
             shutil.copy2(backup_file, 'usuarios.json')
         st.error(f"Erro ao salvar usuários: {str(e)}")
         return False
-
+    
 def carregar_requisicoes():
-    try:
-        if os.path.exists('requisicoes.json'):
-            if verificar_integridade_json():
-                with open('requisicoes.json', 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            else:
-                if restaurar_ultimo_backup():
-                    with open('requisicoes.json', 'r', encoding='utf-8') as f:
-                        return json.load(f)
-        return []
-    except Exception as e:
-        print(f"Erro ao carregar requisições: {str(e)}")
-        return []
+    conn = sqlite3.connect('requisicoes.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM requisicoes')
+    requisicoes = []
+    for row in cursor.fetchall():
+        requisicao = {
+            'numero': row[0],
+            'cliente': row[1],
+            'vendedor': row[2],
+            'data_hora': row[3],
+            'status': row[4],
+            'items': json.loads(row[5]),
+            'observacoes_vendedor': row[6],
+            'comprador_responsavel': row[7],
+            'data_hora_resposta': row[8],
+            'justificativa_recusa': row[9],
+            'observacao_geral': row[10]
+        }
+        requisicoes.append(requisicao)
+    conn.close()
+    return requisicoes
 
 def validar_requisicao(requisicao):
     campos_obrigatorios = {
@@ -582,35 +612,30 @@ def restaurar_ultimo_backup():
             return False
     return False
 
-
-def salvar_requisicao_db():
-    try:
-        # Criar backup antes
-        backup_requisicoes()
-        
-        # Salvar em arquivo temporário primeiro
-        temp_file = 'requisicoes_temp.json'
-        with open(temp_file, 'w', encoding='utf-8') as f:
-            json.dump(st.session_state.requisicoes, f, ensure_ascii=False, indent=4)
-        
-        # Verificar integridade do arquivo temporário
-        with open(temp_file, 'r', encoding='utf-8') as f:
-            json.load(f)
-            
-        # Se passou na verificação, move para arquivo final
-        os.replace(temp_file, 'requisicoes.json')
-        
-        # Verifica integridade final
-        if not verificar_integridade_json():
-            raise Exception("Arquivo final corrompido")
-            
-        return True
-        
-    except Exception as e:
-        print(f"Erro ao salvar: {str(e)}")
-        if restaurar_ultimo_backup():
-            print("Backup restaurado com sucesso")
-        return False
+def salvar_requisicao(requisicao):
+    conn = sqlite3.connect('requisicoes.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+    INSERT OR REPLACE INTO requisicoes 
+    (numero, cliente, vendedor, data_hora, status, items, observacoes_vendedor, 
+    comprador_responsavel, data_hora_resposta, justificativa_recusa, observacao_geral)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        requisicao['numero'],
+        requisicao['cliente'],
+        requisicao['vendedor'],
+        requisicao['data_hora'],
+        requisicao['status'],
+        json.dumps(requisicao['items']),
+        requisicao.get('observacoes_vendedor', ''),
+        requisicao.get('comprador_responsavel', ''),
+        requisicao.get('data_hora_resposta', ''),
+        requisicao.get('justificativa_recusa', ''),
+        requisicao.get('observacao_geral', '')
+    ))
+    conn.commit()
+    conn.close()
+    return True
 
 def get_data_hora_brasil():
     try:
@@ -1282,6 +1307,8 @@ def nova_requisicao():
                 key="observacoes_vendedor",
                 height=100
             )
+        else:
+            observacoes_vendedor = ""  # Valor padrão quando não há observações
 
         col1, col2 = st.columns(2)
         with col1:
@@ -1290,22 +1317,21 @@ def nova_requisicao():
                     st.error("PREENCHIMENTO OBRIGATÓRIO: CLIENTE")
                     return
                 
-                nova_requisicao = {
+                nova_req = {
                     'numero': get_next_requisition_number(),
                     'cliente': cliente,
                     'vendedor': st.session_state['usuario'],
                     'data_hora': get_data_hora_brasil(),
                     'status': 'ABERTA',
                     'items': st.session_state.items_temp.copy(),
-                    'observacoes_vendedor': observacoes_vendedor  # Agora sempre terá um valor
+                    'observacoes_vendedor': observacoes_vendedor
                 }
                 
-                st.session_state.requisicoes.append(nova_requisicao)
-                salvar_requisicao_db()
-                st.session_state.items_temp = []
-                st.success("Requisição enviada com sucesso!")
-                st.session_state['modo_requisicao'] = None
-                st.rerun()
+                if salvar_requisicao(nova_req):
+                    st.session_state.items_temp = []
+                    st.success("Requisição enviada com sucesso!")
+                    st.session_state['modo_requisicao'] = None
+                    st.rerun()
 
 def salvar_configuracoes():
     try:
@@ -1617,7 +1643,7 @@ def requisicoes():
                                     req['status'] = 'EM ANDAMENTO'
                                     req['comprador_responsavel'] = st.session_state['usuario']
                                     req['data_hora_aceite'] = get_data_hora_brasil()
-                                    if salvar_requisicao_db():
+                                    if salvar_requisicao(req):
                                         enviar_notificacao(
                                             f"Requisição {req['numero']} Aceita",
                                             f"{st.session_state['usuario']} aceitou a requisição Nº{req['numero']} para o cliente {req['cliente']}",
@@ -1677,7 +1703,7 @@ def requisicoes():
                                     req['data_hora_resposta'] = get_data_hora_brasil()
                                     req['justificativa_recusa'] = justificativa
                                     
-                                    if salvar_requisicao_db():
+                                    if salvar_requisicao(req):
                                         try:
                                             enviar_notificacao(
                                                 f"Requisição {req['numero']} Recusada",
@@ -1847,7 +1873,7 @@ def requisicoes():
                                         item['salvo'] = True
                                         if mostrar_obs:
                                             req['observacao_geral'] = observacao_geral
-                                        salvar_requisicao_db()
+                                        salvar_requisicao(req)
                                         st.success(f"ITEM {item['item']} SALVO COM SUCESSO!")
                                         st.rerun()
                                 
@@ -1857,7 +1883,7 @@ def requisicoes():
                                         if st.button("✅ FINALIZAR", key=f"finalizar_{req['numero']}", type="primary"):
                                             req['status'] = 'FINALIZADA'
                                             req['data_hora_resposta'] = get_data_hora_brasil()
-                                            if salvar_requisicao_db():
+                                            if salvar_requisicao(req):
                                                 enviar_email_requisicao(req, "finalizada")
                                                 enviar_notificacao(
                                                     f"REQUISIÇÃO {req['numero']} FINALIZADA",
@@ -2205,11 +2231,12 @@ def configuracoes():
                     fig = mostrar_espaco_armazenamento()
                     st.plotly_chart(fig)
                 
-                st.markdown("#### Logs de Erros")
-                with st.expander("Visualizar Logs"):
-                    logs = ["Erro 1: Falha na conexão", "Erro 2: Timeout", "Erro 3: Dados inválidos"]
-                    for log in logs:
-                        st.text(log)
+                st.markdown("#### Visualização de Dados")
+                if st.button("🔍 Visualizar Dados do Banco", type="primary"):
+                    conn = sqlite3.connect('requisicoes.db')
+                    df = pd.read_sql_query("SELECT * FROM requisicoes", conn)
+                    st.dataframe(df)
+                    conn.close()
             
             with tab2:
                 st.markdown("#### Configurações de Backup")
@@ -2225,56 +2252,46 @@ def configuracoes():
                     st.markdown("##### Último Backup")
                     st.info(f"Data: {get_data_hora_brasil()}")
                 
-                col_backup1, col_backup2 = st.columns(2)
-                with col_backup1:
-                    if st.button("🔄 Forçar Backup Agora", type="primary"):
-                        backup_file, backup_size = backup_automatico(st.session_state)
-                        if backup_file:
-                            st.success(f"Backup realizado com sucesso! Tamanho: {backup_size/1024:.2f} KB")
-                        else:
-                            st.error("Falha ao realizar o backup.")
+                # Botão de Backup Manual
+                if st.button("🔄 Forçar Backup Agora", type="primary"):
+                    backup_file, backup_size = backup_automatico(st.session_state)
+                    if backup_file:
+                        st.success(f"Backup realizado com sucesso! Tamanho: {backup_size/1024:.2f} KB")
+                    else:
+                        st.error("Falha ao realizar o backup.")
                 
-                with col_backup2:
-                    if st.button("⬇️ Download Backup (ZIP)", type="primary"):
-                        backup_file, _ = backup_automatico(st.session_state)
-                        if backup_file:
-                            with open(backup_file, "rb") as f:
-                                bytes_data = f.read()
-                            st.download_button(
-                                label="Download ZIP",
-                                data=bytes_data,
-                                file_name="backup_sistema.zip",
-                                mime="application/zip"
-                            )
-                        else:
-                            st.error("Falha ao gerar o arquivo de backup.")
-            
-            with tab3:
-                st.markdown("#### Personalização do Sistema")
-                col1, col2, col3 = st.columns(3)
+                # Lista de Backups Disponíveis
+                st.markdown("#### Backups Disponíveis")
                 
-                with col1:
-                    cor_primaria = st.color_picker("Primária", "#2D2C74", key="cor_primaria")
-                    cor_texto = st.color_picker("Texto", "#000000", key="cor_texto")
-                    familia_fonte = st.selectbox("Fonte", ["Inter", "Roboto", "Open Sans", "Lato", "Montserrat"])
-                with col2:
-                    cor_secundaria = st.color_picker("Secundária", "#1B81C5", key="cor_secundaria")
-                    cor_botoes = st.color_picker("Botões", "#2D2C74", key="cor_botoes")
-                    tamanho_fonte = st.number_input("Tamanho Base", min_value=12, max_value=20, value=16)
-                with col3:
-                    cor_fundo = st.color_picker("Fundo", "#f8f9fa", key="cor_fundo")
-                    cor_campos = st.color_picker("Campos", "#ffffff", key="cor_campos")
-                    raio_borda = st.number_input("Raio da Borda", min_value=0, max_value=20, value=4)
-
-                st.markdown("#### Preview")
-                preview_html = f"""
-                    <div style="padding: 20px; border-radius: 10px; background-color: {cor_fundo};">
-                        <h4 style="color: {cor_texto}; font-family: {familia_fonte};">Exemplo de Visualização</h4>
-                        <button style="background-color: {cor_botoes}; color: white; padding: 10px; border: none; border-radius: {raio_borda}px; margin: 5px;">Botão</button>
-                        <input type="text" placeholder="Campo de texto" style="background-color: {cor_campos}; border: 1px solid {cor_secundaria}; padding: 5px; margin: 5px; border-radius: {raio_borda}px;">
-                    </div>
-                """
-                st.markdown(preview_html, unsafe_allow_html=True)
+                import os
+                backup_dir = "backups"
+                if os.path.exists(backup_dir):
+                    backup_files = [f for f in os.listdir(backup_dir) if f.endswith('.py') or f.endswith('.zip')]
+                    
+                    if backup_files:
+                        for backup_file in backup_files:
+                            col1, col2, col3 = st.columns([3, 1, 1])
+                            file_path = os.path.join(backup_dir, backup_file)
+                            file_size = os.path.getsize(file_path)
+                            
+                            with col1:
+                                st.text(backup_file)
+                            with col2:
+                                st.text(f"{file_size/1024:.2f} KB")
+                            with col3:
+                                with open(file_path, "rb") as f:
+                                    bytes_data = f.read()
+                                    st.download_button(
+                                        label="⬇️",
+                                        data=bytes_data,
+                                        file_name=backup_file,
+                                        mime="application/octet-stream",
+                                        key=f"download_{backup_file}"
+                                    )
+                    else:
+                        st.info("Nenhum arquivo de backup encontrado.")
+                else:
+                    st.warning("Diretório de backup não encontrado.")
 
 def main():
     # Adiciona atualização automática a cada 120 segundos
