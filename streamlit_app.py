@@ -2246,8 +2246,6 @@ def main():
     
     if 'usuario' not in st.session_state:
         tela_login()
-    else:
-        solicitar_permissao_notificacao()
         
         # Adicione aqui a mensagem fixa
         col1, col2 = st.columns([3,1])
