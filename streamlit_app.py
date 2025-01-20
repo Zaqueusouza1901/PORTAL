@@ -2280,7 +2280,7 @@ def configuracoes():
                 if st.button("🔄 Forçar Backup Agora", type="primary"):
                     backup_file, backup_size = backup_automatico(st.session_state)
                     if backup_file:
-                        st.success(f"Backup realizado com sucesso! Tamanho: {backup_size/1
+                        st.success(f"Backup realizado com sucesso! Tamanho: {backup_size/1024:.2f} MB")
                 
                 # Lista de Backups Disponíveis
                 st.markdown("#### Backups Disponíveis")
