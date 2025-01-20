@@ -1323,6 +1323,7 @@ def nova_requisicao():
                 }
                 
                 if salvar_requisicao(nova_req):
+                    st.session_state.requisicoes = carregar_requisicoes()
                     st.session_state.items_temp = []
                     st.success("Requisição enviada com sucesso!")
                     st.session_state['modo_requisicao'] = None
