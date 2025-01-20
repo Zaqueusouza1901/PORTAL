@@ -201,36 +201,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-def init_notification_js():
-    st.components.v1.html("""
-        <script>
-        if (!window.Notification) {
-            console.log('Este navegador não suporta notificações');
-        } else {
-            if (Notification.permission !== 'granted' && Notification.permission !== 'denied') {
-                Notification.requestPermission().then(function(permission) {
-                    if (permission === 'granted') {
-                        new Notification('Notificações Ativadas', {
-                            body: 'Você receberá notificações sobre suas requisições',
-                            icon: '/favicon.ico'
-                        });
-                    }
-                });
-            }
-        }
-
-        window.createNotification = function(title, body) {
-            if (Notification.permission === 'granted') {
-                new Notification(title, {
-                    body: body,
-                    icon: '/favicon.ico',
-                    requireInteraction: true
-                });
-            }
-        }
-        </script>
-    """, height=0)
-
 def notify(title, message):
     if st.session_state.get('notificacoes_ativas', True):
         js = f"""
@@ -315,53 +285,6 @@ div.element-container {
 }
 </style>
 """, unsafe_allow_html=True)
-
-def solicitar_permissao_notificacao():
-    st.markdown("""
-    <script>
-    function solicitarPermissao() {
-        if (!("Notification" in window)) {
-            alert("Este navegador não suporta notificações na área de trabalho");
-        } else if (Notification.permission === "granted") {
-            console.log("Permissão para notificações já concedida");
-        } else if (Notification.permission !== "denied") {
-            Notification.requestPermission().then(function (permission) {
-                if (permission === "granted") {
-                    console.log("Permissão para notificações concedida");
-                }
-            });
-        }
-    }
-    solicitarPermissao();
-    </script>
-    """, unsafe_allow_html=True)
-
-def enviar_notificacao(titulo, corpo, numero_requisicao):
-    st.markdown(f"""
-    <script>
-    function enviarNotificacao() {{
-        if (Notification.permission === "granted") {{
-            var notification = new Notification("{titulo}", {{
-                body: "{corpo}",
-                icon: "/favicon.ico",
-                tag: "requisicao-{numero_requisicao}",
-                requireInteraction: true
-            }});
-            
-            notification.onclick = function() {{
-                window.focus();
-                const element = document.getElementById("requisicao-{numero_requisicao}");
-                if (element) {{
-                    element.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
-                    element.style.animation = 'highlight 2s';
-                }}
-                notification.close();
-            }};
-        }}
-    }}
-    enviarNotificacao();
-    </script>
-    """, unsafe_allow_html=True)
 
 def get_permissoes_perfil(perfil):
     permissoes_padrao = {
@@ -1953,40 +1876,7 @@ def requisicoes():
                                             else:
                                                 st.error("ERRO AO SALVAR A REQUISIÇÃO. TENTE NOVAMENTE.")
 
-def configurar_notificacoes():
-    st.markdown("#### Configurações de Notificações")
-    
-    # Inicializar configuração no session_state
-    if 'notificacoes_ativas' not in st.session_state:
-        st.session_state.notificacoes_ativas = True
-    
-    # Toggle para ativar/desativar notificações
-    notificacoes_ativas = st.toggle(
-        "Ativar notificações na área de trabalho",
-        value=st.session_state.notificacoes_ativas,
-        key="toggle_notificacoes"
-    )
-    
-    # Atualizar estado das notificações
-    if notificacoes_ativas != st.session_state.notificacoes_ativas:
-        st.session_state.notificacoes_ativas = notificacoes_ativas
-        if notificacoes_ativas:
-            solicitar_permissao_notificacao()
-            st.success("Notificações ativadas com sucesso!")
-        else:
-            st.warning("Notificações desativadas")
-    
-    # Botão de teste de notificação
-    st.markdown("---")
-    st.markdown("#### Testar Notificações")
-    if st.button("🔔 Enviar Notificação de Teste", type="primary"):
-        enviar_notificacao(
-            "Teste de Notificação",
-            "Se você está vendo esta mensagem, as notificações estão funcionando corretamente!",
-            "teste"
-        )
-        st.success("Notificação de teste enviada!")
-                                        
+                                       
 def save_tema(tema):
     try:
         with open('tema.json', 'w', encoding='utf-8') as f:
