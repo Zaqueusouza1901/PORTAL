@@ -3,6 +3,7 @@ import sqlite3
 import pandas as pd
 import time
 import zipfile
+import csv
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 import pytz
@@ -40,6 +41,38 @@ def inicializar_banco():
         print("Banco de dados inicializado com sucesso")
     except Exception as e:
         print(f"Erro ao inicializar banco de dados: {str(e)}")
+
+def csv_to_json(csv_file, json_file):
+    requisicoes = []
+    
+    with open(csv_file, 'r', encoding='utf-8') as file:
+        csv_reader = csv.DictReader(file)
+        for row in csv_reader:
+            requisicao = {
+                'numero': int(row['REQUISIÇÃO']),
+                'status': row['STATUS'],
+                'data_hora': row['Data/Hora Criação:'],
+                'data_hora_resposta': row['Data/Hora Resposta:'],
+                'cliente': row['CLIENTE'],
+                'vendedor': row['VENDEDOR'],
+                'comprador_responsavel': row['COMPRADOR'],
+                'items': [{
+                    'item': 1,
+                    'codigo': row['CÓDIGO'],
+                    'descricao': row['DESCRIÇÃO'],
+                    'marca': row['MARCA'],
+                    'quantidade': float(row['QUANTIDADE']),
+                    'venda_unit': float(row[' R$ UNIT '].replace('R$ ', '').replace('.', '').replace(',', '.')),
+                    'prazo_entrega': row['PRAZO']
+                }],
+                'observacao_geral': row['OBSERVAÇÕES DO COMPRADOR']
+            }
+            requisicoes.append(requisicao)
+    
+    with open(json_file, 'w', encoding='utf-8') as file:
+        json.dump(requisicoes, file, ensure_ascii=False, indent=4)
+
+csv_to_json('requisicoes.csv', 'requisicoes.json')
 
 def mostrar_espaco_armazenamento():
     import plotly.graph_objects as go
@@ -504,6 +537,12 @@ def salvar_usuarios():
         return False
     
 def carregar_requisicoes():
+    try:
+        with open('requisicoes.json', 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        st.error(f"Erro ao carregar requisições: {str(e)}")
+        return []
     try:
         conn = sqlite3.connect('requisicoes.db')
         cursor = conn.cursor()
@@ -1937,7 +1976,6 @@ def save_tema(tema):
 def configuracoes():
     st.title("Configurações")
     
-    # Menu principal apenas para administradores
     if st.session_state['perfil'] in ['administrador', 'comprador']:
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -1953,10 +1991,8 @@ def configuracoes():
                 st.session_state['config_modo'] = 'sistema'
                 st.rerun()
     else:
-        # Para outros perfis, mostrar diretamente as configurações de sistema
         st.session_state['config_modo'] = 'sistema'
 
-    # Seção de Usuários (apenas para administradores)
     if st.session_state.get('config_modo') == 'usuarios' and st.session_state['perfil'] == 'administrador':
         st.markdown("""
             <style>
@@ -1988,12 +2024,10 @@ def configuracoes():
 
         st.markdown("### Gerenciamento de Usuários")
         
-        # Botão de Cadastro
         if st.button("➕ Cadastrar Novo Usuário", type="primary", use_container_width=True):
             st.session_state['modo_usuario'] = 'cadastrar'
             st.rerun()
 
-        # Formulário de Cadastro
         if st.session_state.get('modo_usuario') == 'cadastrar':
             with st.form("cadastro_usuario"):
                 st.subheader("Cadastrar Novo Usuário")
@@ -2033,7 +2067,6 @@ def configuracoes():
                         st.session_state['modo_usuario'] = None
                         st.rerun()
 
-        # Busca e Edição
         usuarios_filtrados = st.session_state.usuarios
 
         if usuarios_filtrados:
@@ -2091,7 +2124,6 @@ def configuracoes():
                         else:
                             st.error("Não é possível excluir um administrador")
 
-        # Tabela de Usuários
         st.markdown("#### Usuários Cadastrados")
         usuarios_df = pd.DataFrame([{
             'Usuário': usuario,
@@ -2183,9 +2215,8 @@ def configuracoes():
     elif st.session_state.get('config_modo') == 'sistema':
         st.markdown("### Configurações do Sistema")
         
-        # Se for administrador, mostra todas as abas
         if st.session_state['perfil'] == 'administrador':
-            tab1, tab2, tab3 = st.tabs(["📊 Monitoramento", "📁 Backup", "⚙️ Personalizar"])
+            tab1, tab2 = st.tabs(["📊 Monitoramento", "⚙️ Personalizar"])
             
             with tab1:
                 st.markdown("#### Monitoramento do Sistema")
@@ -2195,7 +2226,6 @@ def configuracoes():
                 with col1:
                     st.markdown("##### Desempenho do Sistema")
                     
-                    # Gráfico de manômetro para desempenho
                     import plotly.graph_objects as go
                     
                     fig = go.Figure(go.Indicator(
@@ -2233,8 +2263,7 @@ def configuracoes():
                     df = pd.read_sql_query("SELECT * FROM requisicoes", conn)
                     st.dataframe(df)
                     conn.close()
-            
-            with tab2:
+                
                 st.markdown("#### Configurações de Backup")
                 col1, col2 = st.columns(2)
                 
@@ -2248,13 +2277,10 @@ def configuracoes():
                     st.markdown("##### Último Backup")
                     st.info(f"Data: {get_data_hora_brasil()}")
                 
-                # Botão de Backup Manual
                 if st.button("🔄 Forçar Backup Agora", type="primary"):
                     backup_file, backup_size = backup_automatico(st.session_state)
                     if backup_file:
-                        st.success(f"Backup realizado com sucesso! Tamanho: {backup_size/1024:.2f} KB")
-                    else:
-                        st.error("Falha ao realizar o backup.")
+                        st.success(f"Backup realizado com sucesso! Tamanho: {backup_size/1
                 
                 # Lista de Backups Disponíveis
                 st.markdown("#### Backups Disponíveis")
