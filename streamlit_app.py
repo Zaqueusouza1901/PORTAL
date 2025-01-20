@@ -528,6 +528,34 @@ def carregar_requisicoes():
         st.error(f"Erro ao carregar requisições: {str(e)}")
         return []
 
+def renumerar_requisicoes():
+    try:
+        conn = sqlite3.connect('requisicoes.db')
+        cursor = conn.cursor()
+        
+        # Buscar todas as requisições ordenadas por data
+        cursor.execute('SELECT * FROM requisicoes ORDER BY data_hora')
+        requisicoes = cursor.fetchall()
+        
+        # Iniciar numeração a partir de 5092
+        novo_numero = 5092
+        
+        # Atualizar cada requisição com novo número
+        for req in requisicoes:
+            cursor.execute('''
+                UPDATE requisicoes 
+                SET numero = ? 
+                WHERE numero = ?
+            ''', (novo_numero, req[0]))
+            novo_numero += 1
+        
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Erro ao renumerar requisições: {str(e)}")
+        return False
+
 def backup_requisicoes():
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
