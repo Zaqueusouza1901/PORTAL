@@ -2342,8 +2342,11 @@ def main():
     # Inicializar o banco de dados
     inicializar_banco()
     
-    # Migrar dados do JSON para SQLite
-    migrar_dados_json_para_sqlite()
+    # Executar migração e renumeração
+    if migrar_dados_json_para_sqlite():
+        st.success("Migração concluída com sucesso")
+        if renumerar_requisicoes():
+            st.success("Renumeração concluída com sucesso")
     
     # Renumerar requisições
     renumerar_requisicoes()
