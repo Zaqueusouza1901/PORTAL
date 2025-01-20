@@ -3,7 +3,6 @@ import sqlite3
 import pandas as pd
 import time
 import zipfile
-import csv
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 import pytz
@@ -41,38 +40,6 @@ def inicializar_banco():
         print("Banco de dados inicializado com sucesso")
     except Exception as e:
         print(f"Erro ao inicializar banco de dados: {str(e)}")
-
-def csv_to_json(csv_file, json_file):
-    requisicoes = []
-    
-    with open(csv_file, 'r', encoding='utf-8') as file:
-        csv_reader = csv.DictReader(file)
-        for row in csv_reader:
-            requisicao = {
-                'numero': int(row['REQUISIÇÃO']),
-                'status': row['STATUS'],
-                'data_hora': row['Data/Hora Criação:'],
-                'data_hora_resposta': row['Data/Hora Resposta:'],
-                'cliente': row['CLIENTE'],
-                'vendedor': row['VENDEDOR'],
-                'comprador_responsavel': row['COMPRADOR'],
-                'items': [{
-                    'item': 1,
-                    'codigo': row['CÓDIGO'],
-                    'descricao': row['DESCRIÇÃO'],
-                    'marca': row['MARCA'],
-                    'quantidade': float(row['QUANTIDADE']),
-                    'venda_unit': float(row[' R$ UNIT '].replace('R$ ', '').replace('.', '').replace(',', '.')),
-                    'prazo_entrega': row['PRAZO']
-                }],
-                'observacao_geral': row['OBSERVAÇÕES DO COMPRADOR']
-            }
-            requisicoes.append(requisicao)
-    
-    with open(json_file, 'w', encoding='utf-8') as file:
-        json.dump(requisicoes, file, ensure_ascii=False, indent=4)
-
-csv_to_json('requisicoes.csv', 'requisicoes.json')
 
 def mostrar_espaco_armazenamento():
     import plotly.graph_objects as go
@@ -537,12 +504,6 @@ def salvar_usuarios():
         return False
     
 def carregar_requisicoes():
-    try:
-        with open('requisicoes.json', 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception as e:
-        st.error(f"Erro ao carregar requisições: {str(e)}")
-        return []
     try:
         conn = sqlite3.connect('requisicoes.db')
         cursor = conn.cursor()
