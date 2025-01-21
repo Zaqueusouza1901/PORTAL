@@ -18,7 +18,7 @@ from streamlit_autorefresh import st_autorefresh
 
 def inicializar_banco():
     try:
-        conn = sqlite3.connect('database/requisicoes.db')
+        conn = sqlite3.connect('database/requisicoes.db')  # Novo caminho
         cursor = conn.cursor()
         cursor.execute('''CREATE TABLE IF NOT EXISTS requisicoes
             (numero TEXT PRIMARY KEY, 
@@ -219,12 +219,11 @@ def save_perfis_permissoes(perfil, permissoes):
         return False
 
 def verificar_diretorios():
-    try:
-        os.makedirs('backup', exist_ok=True)
-        return True
-    except Exception as e:
-        st.error(f"Erro ao criar diretório: {str(e)}")
-        return False
+    diretorios = ['database', 'backups']
+    for dir in diretorios:
+        if not os.path.exists(dir):
+            os.makedirs(dir)
+    return True
 
 def verificar_arquivos():
     try:
