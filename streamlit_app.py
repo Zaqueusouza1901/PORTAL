@@ -18,7 +18,7 @@ from streamlit_autorefresh import st_autorefresh
 
 def inicializar_banco():
     try:
-        conn = sqlite3.connect('database/requisicoes.db')  # Novo caminho
+        conn = sqlite3.connect('database/requisicoes.db')  # Caminho correto
         cursor = conn.cursor()
         cursor.execute('''CREATE TABLE IF NOT EXISTS requisicoes
             (numero TEXT PRIMARY KEY, 
