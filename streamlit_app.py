@@ -2048,7 +2048,7 @@ def configuracoes():
                 font-weight: bold;
             }
             div.stButton > button:hover {
-                background-color: #0066cc;
+                background-color: #0088ff;
                 color: white;
             }
             </style>
