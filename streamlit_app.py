@@ -1905,11 +1905,6 @@ def configuracoes():
                 st.session_state['config_modo'] = 'sistema'
                 st.rerun()
     
-    # Seções de configuração
-    if st.session_state.get('config_modo') == 'usuarios' and st.session_state['perfil'] == 'administrador':
-        configuracoes_usuarios()
-    elif st.session_state.get('config_modo') == 'perfis':
-        configuracoes_perfis()
     elif st.session_state.get('config_modo') == 'sistema':
         st.markdown("### Configurações do Sistema")
         
