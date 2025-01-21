@@ -391,16 +391,23 @@ def carregar_requisicoes():
         cursor.execute('SELECT * FROM requisicoes')
         requisicoes = []
         for row in cursor.fetchall():
+            try:
+                items = json.loads(row[5]) if row[5] else []
+            except:
+                items = []
+                
             requisicao = {
                 'numero': row[0],
                 'cliente': row[1],
                 'vendedor': row[2],
                 'data_hora': row[3],
                 'status': row[4],
-                'items': json.loads(row[5]),
+                'items': items,
                 'observacoes_vendedor': row[6],
                 'comprador_responsavel': row[7],
-                'data_hora_resposta': row[8]
+                'data_hora_resposta': row[8],
+                'justificativa_recusa': row[9],
+                'observacao_geral': row[10]
             }
             requisicoes.append(requisicao)
         conn.close()
