@@ -2040,20 +2040,6 @@ def configuracoes():
 
     # Seção de Perfis
     elif st.session_state.get('config_modo') == 'perfis':
-        st.markdown("""
-            <style>
-            div.stButton > button:first-child {
-                background-color: #0088ff;
-                color: white;
-                font-weight: bold;
-            }
-            div.stButton > button:hover {
-                background-color: #0088ff;
-                color: white;
-            }
-            </style>
-        """, unsafe_allow_html=True)
-        
         st.markdown("### Gerenciamento de Perfis")
         
         perfil_selecionado = st.selectbox("Selecione o perfil para editar", ['vendedor', 'comprador', 'administrador'])
@@ -2073,11 +2059,12 @@ def configuracoes():
                 ('importacao', '✈️ Importação'),
                 ('configuracoes', '⚙️ Configurações')
             ]:
-                valor_padrao = True if tela in ['dashboard', 'requisicoes'] else False
+                valor_padrao = True if tela in ['dashboard', 'requisicoes', 'cotacoes'] else False
+                key = f"{perfil_selecionado}_{tela}"
                 permissoes[tela] = st.toggle(
                     icone,
                     value=st.session_state.get('perfis', {}).get(perfil_selecionado, {}).get(tela, valor_padrao),
-                    key=f"toggle_{tela}"
+                    key=key
                 )
         
         with col2:
@@ -2087,21 +2074,23 @@ def configuracoes():
                 ('excluir_usuarios', '❌ Excluir Usuários'),
                 ('editar_perfis', '🔑 Editar Perfis')
             ]:
+                valor_padrao = True if perfil_selecionado == 'administrador' else False
+                key = f"{perfil_selecionado}_{permissao}"
                 permissoes[permissao] = st.toggle(
                     icone,
-                    value=st.session_state.get('perfis', {}).get(perfil_selecionado, {}).get(permissao, False),
-                    key=f"toggle_{permissao}"
+                    value=st.session_state.get('perfis', {}).get(perfil_selecionado, {}).get(permissao, valor_padrao),
+                    key=key
                 )
         
         col1, col2 = st.columns(2)
         with col1:
             if st.button("💾 Salvar Permissões", type="primary", use_container_width=True):
-                if 'perfis' not in st.session_state:
-                    st.session_state.perfis = {}
-                st.session_state.perfis[perfil_selecionado] = permissoes
                 try:
-                    with open('perfis.json', 'w', encoding='utf-8') as f:
-                        json.dump(st.session_state.perfis, f, ensure_ascii=False, indent=4)
+                    if 'perfis' not in st.session_state:
+                        st.session_state.perfis = {}
+                    
+                    st.session_state.perfis[perfil_selecionado] = permissoes
+                    save_perfis_permissoes(perfil_selecionado, permissoes)
                     st.success(f"Permissões do perfil {perfil_selecionado} atualizadas com sucesso!")
                     time.sleep(1)
                     st.rerun()
