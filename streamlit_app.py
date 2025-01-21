@@ -2038,64 +2038,64 @@ def configuracoes():
             }
         )
 
-# Seção de Perfis
-elif st.session_state.get('config_modo') == 'perfis':
-    st.markdown("### Gerenciamento de Perfis")
-    
-    perfil_selecionado = st.selectbox("Selecione o perfil para editar", ['vendedor', 'comprador', 'administrador'])
-    
-    st.markdown("#### Permissões de Acesso")
-    st.markdown("Defina as telas que este perfil poderá acessar:")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("##### Telas do Sistema")
-        permissoes = {}
-        for tela, icone in [
-            ('dashboard', '📊 Dashboard'),
-            ('requisicoes', '📝 Requisições'),
-            ('cotacoes', '🛒 Cotações'),
-            ('importacao', '✈️ Importação'),
-            ('configuracoes', '⚙️ Configurações')
-        ]:
-            valor_padrao = True if tela in ['dashboard', 'requisicoes', 'cotacoes'] else False
-            key = f"{perfil_selecionado}_{tela}"
-            permissoes[tela] = st.toggle(
-                icone,
-                value=st.session_state.perfis.get(perfil_selecionado, {}).get(tela, valor_padrao),
-                key=key
-            )
-    
-    with col2:
-        st.markdown("##### Permissões Administrativas")
-        for permissao, icone in [
-            ('editar_usuarios', '👥 Editar Usuários'),
-            ('excluir_usuarios', '❌ Excluir Usuários'),
-            ('editar_perfis', '🔑 Editar Perfis')
-        ]:
-            valor_padrao = True if perfil_selecionado == 'administrador' else False
-            key = f"{perfil_selecionado}_{permissao}"
-            permissoes[permissao] = st.toggle(
-                icone,
-                value=st.session_state.perfis.get(perfil_selecionado, {}).get(permissao, valor_padrao),
-                key=key
-            )
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("💾 Salvar Permissões", type="primary", use_container_width=True):
-            try:
-                if 'perfis' not in st.session_state:
-                    st.session_state.perfis = {}
-                
-                st.session_state.perfis[perfil_selecionado] = permissoes
-                save_perfis_permissoes(perfil_selecionado, permissoes)
-                st.success(f"Permissões do perfil {perfil_selecionado} atualizadas com sucesso!")
-                time.sleep(1)
-                st.rerun()
-            except Exception as e:
-                st.error(f"Erro ao salvar permissões: {str(e)}")
+    # Seção de Perfis
+    elif st.session_state.get('config_modo') == 'perfis':
+        st.markdown("### Gerenciamento de Perfis")
+        
+        perfil_selecionado = st.selectbox("Selecione o perfil para editar", ['vendedor', 'comprador', 'administrador'])
+        
+        st.markdown("#### Permissões de Acesso")
+        st.markdown("Defina as telas que este perfil poderá acessar:")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("##### Telas do Sistema")
+            permissoes = {}
+            for tela, icone in [
+                ('dashboard', '📊 Dashboard'),
+                ('requisicoes', '📝 Requisições'),
+                ('cotacoes', '🛒 Cotações'),
+                ('importacao', '✈️ Importação'),
+                ('configuracoes', '⚙️ Configurações')
+            ]:
+                valor_padrao = True if tela in ['dashboard', 'requisicoes', 'cotacoes'] else False
+                key = f"{perfil_selecionado}_{tela}"
+                permissoes[tela] = st.toggle(
+                    icone,
+                    value=st.session_state.get('perfis', {}).get(perfil_selecionado, {}).get(tela, valor_padrao),
+                    key=key
+                )
+        
+        with col2:
+            st.markdown("##### Permissões Administrativas")
+            for permissao, icone in [
+                ('editar_usuarios', '👥 Editar Usuários'),
+                ('excluir_usuarios', '❌ Excluir Usuários'),
+                ('editar_perfis', '🔑 Editar Perfis')
+            ]:
+                valor_padrao = True if perfil_selecionado == 'administrador' else False
+                key = f"{perfil_selecionado}_{permissao}"
+                permissoes[permissao] = st.toggle(
+                    icone,
+                    value=st.session_state.get('perfis', {}).get(perfil_selecionado, {}).get(permissao, valor_padrao),
+                    key=key
+                )
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("💾 Salvar Permissões", type="primary", use_container_width=True):
+                try:
+                    if 'perfis' not in st.session_state:
+                        st.session_state.perfis = {}
+                    
+                    st.session_state.perfis[perfil_selecionado] = permissoes
+                    save_perfis_permissoes(perfil_selecionado, permissoes)
+                    st.success(f"Permissões do perfil {perfil_selecionado} atualizadas com sucesso!")
+                    time.sleep(1)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao salvar permissões: {str(e)}")
             
     # Seção de Sistema
     if st.session_state.get('config_modo') == 'sistema':
