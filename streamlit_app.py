@@ -250,8 +250,7 @@ def carregar_usuarios():
             'perfil': 'administrador',
             'email': 'zaqueu@jetfrio.com.br',
             'ativo': True,
-            'primeiro_acesso': True,
-            'permissoes': get_permissoes_perfil('administrador')
+            'primeiro_acesso': True
         }
     }
     
@@ -263,7 +262,7 @@ def carregar_usuarios():
                 json.dump(usuario_padrao, f, ensure_ascii=False, indent=4)
             print("Arquivo usuarios.json criado com usuário padrão")
             return usuario_padrao
-
+        
         with open('usuarios.json', 'r', encoding='utf-8') as f:
             usuarios = json.load(f)
             if not usuarios:
