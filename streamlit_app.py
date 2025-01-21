@@ -693,7 +693,7 @@ def tela_login():
                 col1, col2 = st.columns([1, 1])
                 
                 with col1:
-                    if st.button("Entrar", use_container_width=True):
+                    use_container_width=True,type="primary"):
                         if not user_data.get('ativo', True):
                             st.error("USUÁRIO INATIVO - CONTATE O ADMINISTRADOR")
                             return
