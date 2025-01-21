@@ -2006,13 +2006,13 @@ def configuracoes():
                 
                 with col1:
                     st.markdown("##### Banco de Dados")
-                    conn = sqlite3.connect('requisicoes.db')
+                    conn = sqlite3.connect('database/requisicoes.db')
                     cursor = conn.cursor()
                     cursor.execute("SELECT COUNT(*) FROM requisicoes")
                     total_requisicoes = cursor.fetchone()[0]
                     
                     # Tamanho do banco de dados
-                    db_size = os.path.getsize('requisicoes.db') / (1024 * 1024)  # Converter para MB
+                    db_size = os.path.getsize('database/requisicoes.db') / (1024 * 1024)  # Converter para MB
                     
                     st.metric("Total de Requisições", total_requisicoes)
                     st.metric("Tamanho do Banco", f"{db_size:.2f} MB")
@@ -2029,47 +2029,40 @@ def configuracoes():
                     if uploaded_file is not None:
                         if st.button("📥 Restaurar Backup", type="primary"):
                             try:
-                                if uploaded_file.name.endswith('.json'):
-                                    conteudo = json.loads(uploaded_file.getvalue().decode('utf-8'))
-                                    sucesso = True
-                                    conn = sqlite3.connect('requisicoes.db')
+                                if uploaded_file.name.endswith('.py'):
+                                    conteudo = uploaded_file.getvalue().decode('utf-8')
+                                    dados_str = conteudo.replace('dados = ', '')
+                                    dados = eval(dados_str)
+                                    
+                                    conn = sqlite3.connect('database/requisicoes.db')
                                     cursor = conn.cursor()
-                                    for req in conteudo:
-                                        try:
-                                            cursor.execute('''
-                                                INSERT OR REPLACE INTO requisicoes 
-                                                (numero, cliente, vendedor, data_hora, status, items, 
-                                                observacoes_vendedor, comprador_responsavel, data_hora_resposta,
-                                                justificativa_recusa, observacao_geral)
-                                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                            ''', (
-                                                req['numero'],
-                                                req['cliente'],
-                                                req['vendedor'],
-                                                req['data_hora'],
-                                                req['status'],
-                                                json.dumps(req['items']),
-                                                req.get('observacoes_vendedor', ''),
-                                                req.get('comprador_responsavel', ''),
-                                                req.get('data_hora_resposta', ''),
-                                                req.get('justificativa_recusa', ''),
-                                                req.get('observacao_geral', '')
-                                            ))
-                                        except Exception as e:
-                                            sucesso = False
-                                            st.error(f"Erro ao inserir dados: {str(e)}")
-                                    if sucesso:
-                                        conn.commit()
+                                    
+                                    for req in dados:
+                                        cursor.execute('''
+                                            INSERT OR REPLACE INTO requisicoes 
+                                            (numero, cliente, vendedor, data_hora, status, items, 
+                                            observacoes_vendedor, comprador_responsavel, data_hora_resposta,
+                                            justificativa_recusa, observacao_geral)
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                        ''', (
+                                            req['numero'],
+                                            req['cliente'],
+                                            req['vendedor'],
+                                            req['data_hora'],
+                                            req['status'],
+                                            req['items'],
+                                            req['observacoes_vendedor'],
+                                            req['comprador_responsavel'],
+                                            req['data_hora_resposta'],
+                                            req['justificativa_recusa'],
+                                            req['observacao_geral']
+                                        ))
+                                    
+                                    conn.commit()
                                     conn.close()
-                                    if sucesso:
-                                        st.success("Dados restaurados e renumerados com sucesso!")
-                                        st.session_state.requisicoes = carregar_requisicoes()
-                                        st.rerun()
-                                elif uploaded_file.name.endswith('.zip'):
-                                    with zipfile.ZipFile(uploaded_file) as zip_ref:
-                                        zip_ref.extractall('temp_restore')
                                     st.success("Backup restaurado com sucesso!")
                                     st.rerun()
+                                    
                             except Exception as e:
                                 st.error(f"Erro na restauração: {str(e)}")
                 
