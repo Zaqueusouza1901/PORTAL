@@ -1580,7 +1580,7 @@ def requisicoes():
                                 <span>CRIADO EM: {req['data_hora']}</span>
                                 <span>VENDEDOR: {req['vendedor']}</span>
                             </div>
-                            <span>COMPRADOR: {req.get('comprador_responsavel', '-')}</span>
+                            <span>COMPRADOR: {req.get('comprador_responsavel', '-')}
                         </div>
                     </div>
                 """, unsafe_allow_html=True)
