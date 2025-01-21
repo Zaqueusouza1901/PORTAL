@@ -658,6 +658,20 @@ if 'perfis' not in st.session_state:
         }
         
 def tela_login():
+    st.markdown("""
+        <style>
+        div.stButton > button:first-child {
+            background-color: #0088ff;
+            color: white;
+            font-weight: bold;
+        }
+        div.stButton > button:hover {
+            background-color: #0066cc;
+            color: white;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    
     st.title("PORTAL - JETFRIO")
     usuario = st.text_input("Usuário", key="usuario_input").upper()
     
@@ -665,7 +679,6 @@ def tela_login():
         if usuario in st.session_state.usuarios:
             user_data = st.session_state.usuarios[usuario]
             
-            # Remover verificação de primeiro_acesso
             if user_data.get('senha') is None:
                 st.markdown("### 😊 Primeiro Acesso - Configure sua senha")
                 with st.form("primeiro_acesso_form"):
@@ -693,8 +706,7 @@ def tela_login():
                 col1, col2 = st.columns([1, 1])
                 
                 with col1:
-                    use_container_width=True,
-                    type="primary"):
+                    if st.button("Entrar", use_container_width=True, type="primary"):
                         if not user_data.get('ativo', True):
                             st.error("USUÁRIO INATIVO - CONTATE O ADMINISTRADOR")
                             return
