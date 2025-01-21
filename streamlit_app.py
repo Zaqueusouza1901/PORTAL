@@ -2018,20 +2018,51 @@ def configuracoes():
                     )
                     
                     if uploaded_file is not None:
-                        if st.button("📥 Restaurar Backup", type="primary"):
-                            try:
-                                if uploaded_file.name.endswith('.json'):
-                                    conteudo = json.loads(uploaded_file.getvalue().decode('utf-8'))
-                                    if migrar_dados_json_para_sqlite():
-                                        if renumerar_requisicoes():
-                                            st.success("Dados restaurados e renumerados com sucesso!")
-                                            st.session_state.requisicoes = carregar_requisicoes()
-                                elif uploaded_file.name.endswith('.zip'):
-                                    with zipfile.ZipFile(uploaded_file) as zip_ref:
-                                        zip_ref.extractall('temp_restore')
-                                    st.success("Backup restaurado com sucesso!")
-                            except Exception as e:
-                                st.error(f"Erro na restauração: {str(e)}")
+    if st.button("📥 Restaurar Backup", type="primary"):
+        try:
+            if uploaded_file.name.endswith('.json'):
+                conteudo = json.loads(uploaded_file.getvalue().decode('utf-8'))
+                sucesso = True
+                conn = sqlite3.connect('requisicoes.db')
+                cursor = conn.cursor()
+                for req in conteudo:
+                    try:
+                        cursor.execute('''
+                            INSERT OR REPLACE INTO requisicoes 
+                            (numero, cliente, vendedor, data_hora, status, items, 
+                            observacoes_vendedor, comprador_responsavel, data_hora_resposta,
+                            justificativa_recusa, observacao_geral)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            req['numero'],
+                            req['cliente'],
+                            req['vendedor'],
+                            req['data_hora'],
+                            req['status'],
+                            json.dumps(req['items']),
+                            req.get('observacoes_vendedor', ''),
+                            req.get('comprador_responsavel', ''),
+                            req.get('data_hora_resposta', ''),
+                            req.get('justificativa_recusa', ''),
+                            req.get('observacao_geral', '')
+                        ))
+                    except Exception as e:
+                        sucesso = False
+                        st.error(f"Erro ao inserir dados: {str(e)}")
+                if sucesso:
+                    conn.commit()
+                conn.close()
+                if sucesso:
+                    st.success("Dados restaurados e renumerados com sucesso!")
+                    st.session_state.requisicoes = carregar_requisicoes()
+                    st.rerun()
+            elif uploaded_file.name.endswith('.zip'):
+                with zipfile.ZipFile(uploaded_file) as zip_ref:
+                    zip_ref.extractall('temp_restore')
+                st.success("Backup restaurado com sucesso!")
+                st.rerun()
+        except Exception as e:
+            st.error(f"Erro na restauração: {str(e)}")
                 
                 st.markdown("#### Visualização de Dados")
                 if st.button("🔍 Visualizar Dados do Banco", type="primary"):
