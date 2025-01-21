@@ -2255,10 +2255,6 @@ def main():
     verificar_diretorios()
     inicializar_banco()
     
-    # Carrega as permissões do usuário atual
-    perfil = st.session_state.get('perfil')
-    permissoes = st.session_state.get('perfis', {}).get(perfil, {})
-    
     # Menu lateral
     with st.sidebar:
         st.title("Menu")
@@ -2272,24 +2268,28 @@ def main():
             </div>
         """, unsafe_allow_html=True)
         
-        # Menu com verificação de permissões
-        if permissoes.get('dashboard', False):
+        # Verifica permissões do usuário
+        perfil = st.session_state.get('perfil')
+        permissoes = st.session_state.get('perfis', {}).get(perfil, {})
+        
+        # Botões do menu com verificação de permissão
+        if permissoes.get('dashboard', True):
             if st.button("📊 Dashboard"):
                 st.session_state.pagina = 'dashboard'
-                
-        if permissoes.get('requisicoes', False):
+            
+        if permissoes.get('requisicoes', True):
             if st.button("📝 Requisições"):
                 st.session_state.pagina = 'requisicoes'
-                
-        if permissoes.get('cotacoes', False):
+            
+        if permissoes.get('cotacoes', True):
             if st.button("🛒 Cotações"):
                 st.session_state.pagina = 'cotacoes'
-                
-        if permissoes.get('importacao', False):
+            
+        if permissoes.get('importacao', True):
             if st.button("✈️ Importação"):
                 st.session_state.pagina = 'importacao'
-                
-        if permissoes.get('configuracoes', False):
+            
+        if permissoes.get('configuracoes', True):
             if st.button("⚙️ Configurações"):
                 st.session_state.pagina = 'configuracoes'
         
