@@ -223,6 +223,10 @@ def verificar_diretorios():
     for dir in diretorios:
         if not os.path.exists(dir):
             os.makedirs(dir)
+            
+    # Verificar se o banco existe
+    if not os.path.exists('database/requisicoes.db'):
+        inicializar_banco()
     return True
 
 def verificar_arquivos():
@@ -311,7 +315,7 @@ def migrar_dados_json_para_sqlite():
         with open('requisicoes.json', 'r', encoding='utf-8') as f:
             requisicoes_json = json.load(f)
         
-        conn = sqlite3.connect('requisicoes.db')
+        conn = sqlite3.connect('database/requisicoes.db')
         cursor = conn.cursor()
         
         for req in requisicoes_json:
@@ -351,7 +355,7 @@ def migrar_dados_json_para_sqlite():
     
 def carregar_requisicoes():
     try:
-        conn = sqlite3.connect('requisicoes.db')
+        conn = sqlite3.connect('database/requisicoes.db')
         cursor = conn.cursor()
         cursor.execute('SELECT * FROM requisicoes')
         requisicoes = []
@@ -459,7 +463,7 @@ def restaurar_ultimo_backup():
     return False
 
 def salvar_requisicao(requisicao):
-    conn = sqlite3.connect('requisicoes.db')
+    conn = sqlite3.connect('database/requisicoes.db')
     cursor = conn.cursor()
     cursor.execute('''
     INSERT OR REPLACE INTO requisicoes 
@@ -2029,14 +2033,34 @@ def configuracoes():
                     if uploaded_file is not None:
                         if st.button("📥 Restaurar Backup", type="primary"):
                             try:
+                                # Backup preventivo
+                                if os.path.exists('database/requisicoes.db'):
+                                    shutil.copy2('database/requisicoes.db', 'backups/pre_restore.db')
+                                
+                                # Processar arquivo
                                 if uploaded_file.name.endswith('.py'):
                                     conteudo = uploaded_file.getvalue().decode('utf-8')
                                     dados_str = conteudo.replace('dados = ', '')
                                     dados = eval(dados_str)
                                     
+                                    # Inicializar banco se não existir
                                     conn = sqlite3.connect('database/requisicoes.db')
                                     cursor = conn.cursor()
+                                    cursor.execute('''CREATE TABLE IF NOT EXISTS requisicoes
+                                        (numero TEXT PRIMARY KEY, 
+                                        cliente TEXT,
+                                        vendedor TEXT,
+                                        data_hora TEXT,
+                                        status TEXT,
+                                        items TEXT,
+                                        observacoes_vendedor TEXT,
+                                        comprador_responsavel TEXT,
+                                        data_hora_resposta TEXT,
+                                        justificativa_recusa TEXT,
+                                        observacao_geral TEXT)''')
+                                    conn.commit()
                                     
+                                    # Inserir dados
                                     for req in dados:
                                         cursor.execute('''
                                             INSERT OR REPLACE INTO requisicoes 
@@ -2050,12 +2074,12 @@ def configuracoes():
                                             req['vendedor'],
                                             req['data_hora'],
                                             req['status'],
-                                            req['items'],
-                                            req['observacoes_vendedor'],
-                                            req['comprador_responsavel'],
-                                            req['data_hora_resposta'],
-                                            req['justificativa_recusa'],
-                                            req['observacao_geral']
+                                            json.dumps(req['items']),
+                                            req.get('observacoes_vendedor', ''),
+                                            req.get('comprador_responsavel', ''),
+                                            req.get('data_hora_resposta', ''),
+                                            req.get('justificativa_recusa', ''),
+                                            req.get('observacao_geral', '')
                                         ))
                                     
                                     conn.commit()
@@ -2065,10 +2089,12 @@ def configuracoes():
                                     
                             except Exception as e:
                                 st.error(f"Erro na restauração: {str(e)}")
+                                if os.path.exists('backups/pre_restore.db'):
+                                    shutil.copy2('backups/pre_restore.db', 'database/requisicoes.db')
                 
                 st.markdown("#### Visualização de Dados")
                 if st.button("🔍 Visualizar Dados do Banco", type="primary"):
-                    conn = sqlite3.connect('requisicoes.db')
+                    conn = sqlite3.connect('database/requisicoes.db')
                     df = pd.read_sql_query("SELECT * FROM requisicoes", conn)
                     st.dataframe(df)
                     conn.close()
@@ -2084,26 +2110,10 @@ def configuracoes():
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         backup_filename = f"backup_{timestamp}.zip"
                         
-                        # Verificar se a tabela existe
-                        conn = sqlite3.connect('requisicoes.db')
-                        cursor = conn.cursor()
-                        cursor.execute('''CREATE TABLE IF NOT EXISTS requisicoes
-                            (numero TEXT PRIMARY KEY, 
-                            cliente TEXT,
-                            vendedor TEXT,
-                            data_hora TEXT,
-                            status TEXT,
-                            items TEXT,
-                            observacoes_vendedor TEXT,
-                            comprador_responsavel TEXT,
-                            data_hora_resposta TEXT,
-                            justificativa_recusa TEXT,
-                            observacao_geral TEXT)''')
-                        conn.commit()
-                        
                         # Criar ZIP com versões TXT e PY
                         with zipfile.ZipFile(f'{backup_dir}/{backup_filename}', 'w') as zipf:
                             # Versão TXT
+                            conn = sqlite3.connect('database/requisicoes.db')
                             df = pd.read_sql_query("SELECT * FROM requisicoes", conn)
                             temp_txt = f'{backup_dir}/temp_backup.txt'
                             df.to_csv(temp_txt, sep='\t', index=False)
@@ -2120,8 +2130,8 @@ def configuracoes():
                                 os.remove(temp_txt)
                             if os.path.exists(temp_py):
                                 os.remove(temp_py)
-                        
-                        conn.close()
+                            
+                            conn.close()
                         st.success("Backup realizado com sucesso!")
                     except Exception as e:
                         st.error(f"Erro ao criar backup: {str(e)}")
