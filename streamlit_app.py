@@ -201,107 +201,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-def notify(title, message):
-    if st.session_state.get('notificacoes_ativas', True):
-        js = f"""
-        <script>
-        if (typeof window.createNotification === 'function') {{
-            window.createNotification("{title}", "{message}");
-        }}
-        </script>
-        """
-        st.components.v1.html(js, height=0)
-
-# Estilo personalizado com adaptação ao tema
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
-* {
-    font-family: 'Inter', sans-serif;
-}
-.stApp {
-    transition: all 0.3s ease-in-out;
-}
-.main {
-    padding: 2rem;
-    background-color: var(--background-color);
-    border-radius: 8px;
-    margin: 1rem;
-}
-.sidebar {
-    background-color: var(--background-color);
-    padding: 2rem 1rem;
-}
-h1 {
-    color: #2D2C74;
-    font-size: 1.8rem;
-    font-weight: 600;
-    margin-bottom: 1.5rem;
-}
-.stButton > button {
-    background-color: #2D2C74;
-    color: white;
-    border-radius: 4px;
-    padding: 0.75rem 1rem;
-    font-weight: 500;
-}
-.stButton > button:hover {
-    background-color: #1B81C5;
-}
-.metric-card {
-    background-color: var(--background-color);
-    padding: 1.5rem;
-    border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
-/* Adaptação para inputs */
-.stTextInput input,
-.stPasswordInput input {
-    color: var(--text-color) !important;
-    background-color: var(--background-color) !important;
-    border-color: var(--secondary-background-color) !important;
-}
-
-/* Adaptação para textos */
-.stMarkdown, .stText {
-    color: var(--text-color) !important;
-}
-
-/* Adaptação para containers */
-[data-testid="stForm"] {
-    background-color: var(--background-color) !important;
-    border: 1px solid var(--secondary-background-color) !important;
-}
-
-/* Adaptação para sidebar */
-section[data-testid="stSidebar"] {
-    background-color: var(--background-color) !important;
-}
-
-/* Adaptação para cards */
-div.element-container {
-    color: var(--text-color) !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-def get_permissoes_perfil(perfil):
-    permissoes_padrao = {
-        'vendedor': ['dashboard', 'requisicoes', 'configuracoes'],
-        'comprador': ['dashboard', 'requisicoes', 'cotacoes', 'importacao', 'configuracoes'],
-        'administrador': ['dashboard', 'requisicoes', 'cotacoes', 'importacao', 'configuracoes', 'editar_usuarios', 'excluir_usuarios', 'editar_perfis']
-    }
-    try:
-        with open('perfis.json', 'r', encoding='utf-8') as f:
-            perfis = json.load(f)
-            return perfis.get(perfil, permissoes_padrao.get(perfil, []))
-    except FileNotFoundError:
-        return permissoes_padrao.get(perfil, [])
-    except Exception as e:
-        st.error(f"Erro ao carregar permissões: {str(e)}")
-        return permissoes_padrao.get(perfil, [])
-
 def save_perfis_permissoes(perfil, permissoes):
     try:
         try:
@@ -381,19 +280,6 @@ def carregar_usuarios():
     except Exception as e:
         print(f"Erro ao carregar usuários: {str(e)}")
         return usuario_padrao
-
-def verificar_sistema():
-    # Verifica diretórios necessários
-    os.makedirs('backup', exist_ok=True)
-    
-    # Verifica arquivo de requisições
-    if not os.path.exists('requisicoes.json'):
-        with open('requisicoes.json', 'w', encoding='utf-8') as f:
-            json.dump([], f)
-    
-    # Verifica integridade e restaura se necessário
-    if not verificar_integridade_json():
-        restaurar_ultimo_backup()
 
 def salvar_usuarios():
     try:
@@ -534,23 +420,6 @@ def backup_requisicoes():
         return False
     except Exception as e:
         print(f"Erro no backup: {str(e)}")
-        return False
-
-def limpar_backups_antigos(dias_retencao=30):
-    backup_files = glob.glob('backup/requisicoes_backup_*.json')
-    data_limite = datetime.now() - timedelta(days=dias_retencao)
-    
-    for arquivo in backup_files:
-        data_arquivo = datetime.fromtimestamp(os.path.getctime(arquivo))
-        if data_arquivo < data_limite:
-            os.remove(arquivo)
-
-def verificar_integridade_json():
-    try:
-        with open('requisicoes.json', 'r', encoding='utf-8') as f:
-            json.load(f)
-        return True
-    except:
         return False
 
 def backup_automatico(dados):
