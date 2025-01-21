@@ -1984,7 +1984,7 @@ def configuracoes():
             st.rerun()
 
     # Seção de Sistema
-    elif st.session_state.get('config_modo') == 'sistema':
+    if st.session_state.get('config_modo') == 'sistema':
         st.markdown("### Configurações do Sistema")
         
         if st.session_state['perfil'] == 'administrador':
@@ -1996,38 +1996,42 @@ def configuracoes():
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    st.markdown("##### Desempenho do Sistema")
+                    st.markdown("##### Banco de Dados")
+                    conn = sqlite3.connect('requisicoes.db')
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT COUNT(*) FROM requisicoes")
+                    total_requisicoes = cursor.fetchone()[0]
                     
-                    import plotly.graph_objects as go
+                    # Tamanho do banco de dados
+                    db_size = os.path.getsize('requisicoes.db') / (1024 * 1024)  # Converter para MB
                     
-                    fig = go.Figure(go.Indicator(
-                        mode = "gauge+number+delta",
-                        value = 75,
-                        domain = {'x': [0, 1], 'y': [0, 1]},
-                        title = {'text': "Desempenho"},
-                        number = {'suffix': "%"},
-                        gauge = {
-                            'axis': {'range': [None, 100]},
-                            'bar': {'color': "rgba(0,0,0,0)"},
-                            'steps': [
-                                {'range': [0, 50], 'color': "red"},
-                                {'range': [50, 75], 'color': "yellow"},
-                                {'range': [75, 100], 'color': "green"}
-                            ],
-                            'threshold': {
-                                'line': {'color': "red", 'width': 4},
-                                'thickness': 0.75,
-                                'value': 90
-                            }
-                        }
-                    ))
-                    
-                    st.plotly_chart(fig)
+                    st.metric("Total de Requisições", total_requisicoes)
+                    st.metric("Tamanho do Banco", f"{db_size:.2f} MB")
+                    conn.close()
                 
                 with col2:
-                    st.markdown("##### Armazenamento de Backup")
-                    fig = mostrar_espaco_armazenamento()
-                    st.plotly_chart(fig)
+                    st.markdown("##### Importação de Backup")
+                    uploaded_file = st.file_uploader(
+                        "Selecione o arquivo de backup",
+                        type=['json', 'txt', 'py', 'zip'],
+                        help="Arquivos suportados: JSON, TXT, PY, ZIP"
+                    )
+                    
+                    if uploaded_file is not None:
+                        if st.button("📥 Restaurar Backup", type="primary"):
+                            try:
+                                if uploaded_file.name.endswith('.json'):
+                                    conteudo = json.loads(uploaded_file.getvalue().decode('utf-8'))
+                                    if migrar_dados_json_para_sqlite():
+                                        if renumerar_requisicoes():
+                                            st.success("Dados restaurados e renumerados com sucesso!")
+                                            st.session_state.requisicoes = carregar_requisicoes()
+                                elif uploaded_file.name.endswith('.zip'):
+                                    with zipfile.ZipFile(uploaded_file) as zip_ref:
+                                        zip_ref.extractall('temp_restore')
+                                    st.success("Backup restaurado com sucesso!")
+                            except Exception as e:
+                                st.error(f"Erro na restauração: {str(e)}")
                 
                 st.markdown("#### Visualização de Dados")
                 if st.button("🔍 Visualizar Dados do Banco", type="primary"):
@@ -2036,31 +2040,34 @@ def configuracoes():
                     st.dataframe(df)
                     conn.close()
                 
-                st.markdown("#### Configurações de Backup")
-                col1, col2 = st.columns(2)
+                if st.button("💾 Backup Manual", type="primary"):
+                    try:
+                        # Criar ZIP com versões TXT e PY
+                        with zipfile.ZipFile(f'backups/backup_{get_data_hora_brasil()}.zip', 'w') as zipf:
+                            # Versão TXT
+                            conn = sqlite3.connect('requisicoes.db')
+                            df = pd.read_sql_query("SELECT * FROM requisicoes", conn)
+                            df.to_csv('backups/temp_backup.txt', sep='\t', index=False)
+                            zipf.write('backups/temp_backup.txt', 'backup.txt')
+                            
+                            # Versão PY
+                            with open('backups/temp_backup.py', 'w') as f:
+                                f.write(f"dados = {df.to_dict('records')}")
+                            zipf.write('backups/temp_backup.py', 'backup.py')
+                            
+                            conn.close()
+                            os.remove('backups/temp_backup.txt')
+                            os.remove('backups/temp_backup.py')
+                        
+                        st.success("Backup realizado com sucesso!")
+                    except Exception as e:
+                        st.error(f"Erro ao criar backup: {str(e)}")
                 
-                with col1:
-                    st.markdown("##### Frequência de Backup")
-                    backup_diario = st.toggle("Backup Diário", value=st.session_state.get('backup_diario', False))
-                    backup_semanal = st.toggle("Backup Semanal", value=st.session_state.get('backup_semanal', False))
-                    backup_mensal = st.toggle("Backup Mensal", value=st.session_state.get('backup_mensal', False))
-                
-                with col2:
-                    st.markdown("##### Último Backup")
-                    st.info(f"Data: {get_data_hora_brasil()}")
-                
-                if st.button("🔄 Forçar Backup Agora", type="primary"):
-                    backup_file, backup_size = backup_automatico(st.session_state)
-                    if backup_file:
-                        st.success(f"Backup realizado com sucesso! Tamanho: {backup_size/1024:.2f} MB")
-                
-                # Lista de Backups Disponíveis
+                # Lista de Backups
                 st.markdown("#### Backups Disponíveis")
-                
-                import os
                 backup_dir = "backups"
                 if os.path.exists(backup_dir):
-                    backup_files = [f for f in os.listdir(backup_dir) if f.endswith('.py') or f.endswith('.zip')]
+                    backup_files = [f for f in os.listdir(backup_dir) if f.endswith(('.zip', '.json', '.txt', '.py'))]
                     
                     if backup_files:
                         for backup_file in backup_files:
