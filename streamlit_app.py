@@ -2073,23 +2073,53 @@ def configuracoes():
                 
                 if st.button("💾 Backup Manual", type="primary"):
                     try:
+                        # Criar diretório de backups se não existir
+                        backup_dir = "backups"
+                        if not os.path.exists(backup_dir):
+                            os.makedirs(backup_dir)
+                        
+                        # Nome do arquivo sem caracteres especiais
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        backup_filename = f"backup_{timestamp}.zip"
+                        
+                        # Verificar se a tabela existe
+                        conn = sqlite3.connect('requisicoes.db')
+                        cursor = conn.cursor()
+                        cursor.execute('''CREATE TABLE IF NOT EXISTS requisicoes
+                            (numero TEXT PRIMARY KEY, 
+                            cliente TEXT,
+                            vendedor TEXT,
+                            data_hora TEXT,
+                            status TEXT,
+                            items TEXT,
+                            observacoes_vendedor TEXT,
+                            comprador_responsavel TEXT,
+                            data_hora_resposta TEXT,
+                            justificativa_recusa TEXT,
+                            observacao_geral TEXT)''')
+                        conn.commit()
+                        
                         # Criar ZIP com versões TXT e PY
-                        with zipfile.ZipFile(f'backups/backup_{get_data_hora_brasil()}.zip', 'w') as zipf:
+                        with zipfile.ZipFile(f'{backup_dir}/{backup_filename}', 'w') as zipf:
                             # Versão TXT
-                            conn = sqlite3.connect('requisicoes.db')
                             df = pd.read_sql_query("SELECT * FROM requisicoes", conn)
-                            df.to_csv('backups/temp_backup.txt', sep='\t', index=False)
-                            zipf.write('backups/temp_backup.txt', 'backup.txt')
+                            temp_txt = f'{backup_dir}/temp_backup.txt'
+                            df.to_csv(temp_txt, sep='\t', index=False)
+                            zipf.write(temp_txt, 'backup.txt')
                             
                             # Versão PY
-                            with open('backups/temp_backup.py', 'w') as f:
+                            temp_py = f'{backup_dir}/temp_backup.py'
+                            with open(temp_py, 'w') as f:
                                 f.write(f"dados = {df.to_dict('records')}")
-                            zipf.write('backups/temp_backup.py', 'backup.py')
+                            zipf.write(temp_py, 'backup.py')
                             
-                            conn.close()
-                            os.remove('backups/temp_backup.txt')
-                            os.remove('backups/temp_backup.py')
+                            # Limpar arquivos temporários
+                            if os.path.exists(temp_txt):
+                                os.remove(temp_txt)
+                            if os.path.exists(temp_py):
+                                os.remove(temp_py)
                         
+                        conn.close()
                         st.success("Backup realizado com sucesso!")
                     except Exception as e:
                         st.error(f"Erro ao criar backup: {str(e)}")
