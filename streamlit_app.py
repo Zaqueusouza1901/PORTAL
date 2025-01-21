@@ -1889,6 +1889,7 @@ def save_tema(tema):
 def configuracoes():
     st.title("Configurações")
     
+    # Primeiro o if principal
     if st.session_state['perfil'] in ['administrador', 'comprador']:
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -1902,6 +1903,18 @@ def configuracoes():
         with col3:
             if st.button("⚙️ Sistema", type="primary", use_container_width=True):
                 st.session_state['config_modo'] = 'sistema'
+                st.rerun()
+    else:
+        st.session_state['config_modo'] = 'sistema'
+
+    # Agora o if/elif para os modos
+    if st.session_state.get('config_modo') == 'usuarios' and st.session_state['perfil'] == 'administrador':
+        # código para usuários
+        pass
+    elif st.session_state.get('config_modo') == 'perfis':
+        # código para perfis
+        pass
+    elif st.session_state.get('config_modo') == 'sistema':
                 st.rerun()
     else:
         st.session_state['config_modo'] = 'sistema'
