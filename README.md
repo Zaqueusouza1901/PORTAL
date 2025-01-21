@@ -1,19 +1,10 @@
-# 🎈 Blank app template
+# Diretório de Backups
 
-A simple Streamlit app template for you to modify!
+Este diretório armazena os backups do sistema, incluindo:
+- Backups automáticos do banco de dados
+- Arquivos de requisições em formato JSON
+- Arquivos de configuração em formato PY
+- Logs do sistema em formato TXT
 
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://blank-app-template.streamlit.app/)
-
-### How to run it on your own machine
-
-1. Install the requirements
-
-   ```
-   $ pip install -r requirements.txt
-   ```
-
-2. Run the app
-
-   ```
-   $ streamlit run streamlit_app.py
-   ```
+## Importante
+Os arquivos neste diretório são gerados automaticamente pelo sistema e servem como ponto de restauração em caso de necessidade.
