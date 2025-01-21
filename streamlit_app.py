@@ -2018,7 +2018,7 @@ def configuracoes():
                     novo_status = st.toggle("Ativo", value=dados_usuario['ativo'])
 
                 col1, col2, col3 = st.columns(3)
-                            with col1:
+                                        with col1:
                 if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
                     try:
                         if novo_nome != usuario_editar and novo_nome in st.session_state.usuarios:
