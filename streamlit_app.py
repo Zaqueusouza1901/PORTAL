@@ -2018,43 +2018,43 @@ def configuracoes():
                     novo_status = st.toggle("Ativo", value=dados_usuario['ativo'])
 
                 col1, col2, col3 = st.columns(3)
-                                        with col1:
-                if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
-                    try:
-                        if novo_nome != usuario_editar and novo_nome in st.session_state.usuarios:
-                            st.error("Nome de usuário já existe")
-                        else:
-                            if novo_nome != usuario_editar:
-                                st.session_state.usuarios[novo_nome] = st.session_state.usuarios.pop(usuario_editar)
-                            st.session_state.usuarios[novo_nome].update({
-                                'email': novo_email,
-                                'perfil': novo_perfil,
-                                'ativo': novo_status,
-                                'permissoes': get_permissoes_perfil(novo_perfil)
-                            })
-                            salvar_usuarios()
-                            st.success("Alterações salvas com sucesso!")
-                            st.rerun()
-                    except Exception as e:   
-                        st.error(f"Erro ao salvar alterações: {str(e)}")
+                with col1:
+                    if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
+                        try:
+                            if novo_nome != usuario_editar and novo_nome in st.session_state.usuarios:
+                                st.error("Nome de usuário já existe")
+                            else:
+                                if novo_nome != usuario_editar:
+                                    st.session_state.usuarios[novo_nome] = st.session_state.usuarios.pop(usuario_editar)
+                                st.session_state.usuarios[novo_nome].update({
+                                    'email': novo_email,
+                                    'perfil': novo_perfil,
+                                    'ativo': novo_status,
+                                    'permissoes': get_permissoes_perfil(novo_perfil)
+                                })
+                                salvar_usuarios()
+                                st.success("Alterações salvas com sucesso!")
+                                st.rerun()
+                        except Exception as e:   
+                            st.error(f"Erro ao salvar alterações: {str(e)}")
 
-            with col2:
-                if st.button("🔄 Reset Senha", type="primary", use_container_width=True):
-                    st.session_state.usuarios[novo_nome]['senha'] = None
-                    st.session_state.usuarios[novo_nome]['primeiro_acesso'] = True
-                    salvar_usuarios()
-                    st.success("Senha resetada com sucesso!")
-                    st.rerun()
-
-            with col3:
-                if st.button("❌ Excluir Usuário", type="primary", use_container_width=True):
-                    if dados_usuario['perfil'] != 'administrador':
-                        st.session_state.usuarios.pop(novo_nome)
+                with col2:
+                    if st.button("🔄 Reset Senha", type="primary", use_container_width=True):
+                        st.session_state.usuarios[novo_nome]['senha'] = None
+                        st.session_state.usuarios[novo_nome]['primeiro_acesso'] = True
                         salvar_usuarios()
-                        st.success("Usuário excluído com sucesso!")
+                        st.success("Senha resetada com sucesso!")
                         st.rerun()
-                    else:
-                        st.error("Não é possível excluir um administrador")
+
+                with col3:
+                    if st.button("❌ Excluir Usuário", type="primary", use_container_width=True):
+                        if dados_usuario['perfil'] != 'administrador':
+                            st.session_state.usuarios.pop(novo_nome)
+                            salvar_usuarios()
+                            st.success("Usuário excluído com sucesso!")
+                            st.rerun()
+                        else:
+                            st.error("Não é possível excluir um administrador")
                 if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
                     try:
                         if novo_nome != usuario_editar and novo_nome in st.session_state.usuarios:
