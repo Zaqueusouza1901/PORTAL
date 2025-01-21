@@ -477,21 +477,52 @@ def backup_automatico(dados):
         st.error(f"Erro ao realizar backup: {str(e)}")
         return None, 0
 
-def restaurar_ultimo_backup():
-    backup_dir = 'backup/'
-    backups = [f for f in os.listdir(backup_dir) if f.endswith('.zip')]
-    if backups:
-        ultimo_backup = sorted(backups)[-1]
-        backup_path = os.path.join(backup_dir, ultimo_backup)
+def restaurar_backup():
+    try:
+        conn = sqlite3.connect('database/requisicoes.db')
+        cursor = conn.cursor()
         
-        try:
-            with zipfile.ZipFile(backup_path, 'r') as zipf:
-                zipf.extractall()
-            return True
-        except Exception as e:
-            st.error(f"Erro ao restaurar backup: {str(e)}")
-            return False
-    return False
+        # Limpa tabela atual
+        cursor.execute('DELETE FROM requisicoes')
+        
+        # Carrega dados do backup
+        with open('backup/ultimo_backup.json', 'r', encoding='utf-8') as f:
+            dados = json.load(f)
+            
+        for req in dados:
+            # Garante que items seja string JSON
+            if isinstance(req['items'], list):
+                req['items'] = json.dumps(req['items'])
+                
+            cursor.execute('''
+                INSERT INTO requisicoes 
+                (numero, cliente, vendedor, data_hora, status, items,
+                observacoes_vendedor, comprador_responsavel, data_hora_resposta,
+                justificativa_recusa, observacao_geral)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                req['numero'],
+                req['cliente'],
+                req['vendedor'],
+                req['data_hora'],
+                req['status'],
+                req['items'],
+                req.get('observacoes_vendedor', ''),
+                req.get('comprador_responsavel', ''),
+                req.get('data_hora_resposta', ''),
+                req.get('justificativa_recusa', ''),
+                req.get('observacao_geral', '')
+            ))
+            
+        conn.commit()
+        conn.close()
+        
+        # Recarrega dados na sessão
+        st.session_state.requisicoes = carregar_requisicoes()
+        return True
+    except Exception as e:
+        st.error(f"Erro ao restaurar backup: {str(e)}")
+        return False
 
 def salvar_requisicao(requisicao):
     conn = sqlite3.connect('database/requisicoes.db')
@@ -758,7 +789,8 @@ def menu_lateral():
         return menu.split(" ")[-1]
 
 def dashboard():
-    st.title("Dashboard")
+    if 'requisicoes' not in st.session_state:
+        st.session_state.requisicoes = carregar_requisicoes()
     
     # Definição dos ícones e cores dos status com transparência
     status_config = {
