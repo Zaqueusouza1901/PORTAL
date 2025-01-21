@@ -549,7 +549,45 @@ if 'usuarios' not in st.session_state:
         inicializar_numero_requisicao()
     if 'requisicoes' not in st.session_state:
         st.session_state.requisicoes = carregar_requisicoes()
-
+# Adicionar aqui a inicialização dos perfis
+if 'perfis' not in st.session_state:
+    try:
+        with open('perfis.json', 'r') as f:
+            st.session_state.perfis = json.load(f)
+    except FileNotFoundError:
+        st.session_state.perfis = {
+            'vendedor': {
+                'dashboard': True,
+                'requisicoes': True,
+                'cotacoes': True,
+                'importacao': False,
+                'configuracoes': False,
+                'editar_usuarios': False,
+                'excluir_usuarios': False,
+                'editar_perfis': False
+            },
+            'comprador': {
+                'dashboard': True,
+                'requisicoes': True,
+                'cotacoes': True,
+                'importacao': True,
+                'configuracoes': False,
+                'editar_usuarios': False,
+                'excluir_usuarios': False,
+                'editar_perfis': False
+            },
+            'administrador': {
+                'dashboard': True,
+                'requisicoes': True,
+                'cotacoes': True,
+                'importacao': True,
+                'configuracoes': True,
+                'editar_usuarios': True,
+                'excluir_usuarios': True,
+                'editar_perfis': True
+            }
+        }
+        
 def tela_login():
     st.title("PORTAL - JETFRIO")
     usuario = st.text_input("Usuário", key="usuario_input").upper()
