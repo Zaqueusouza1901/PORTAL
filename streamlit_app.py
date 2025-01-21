@@ -1921,8 +1921,7 @@ def configuracoes():
     elif st.session_state.get('config_modo') == 'perfis':
         st.markdown("### Gerenciamento de Perfis")
         
-        perfis = ['vendedor', 'comprador', 'administrador']
-        perfil_selecionado = st.selectbox("Selecione o perfil para editar", perfis)
+        perfil_selecionado = st.selectbox("Selecione o perfil para editar", ['vendedor', 'comprador', 'administrador'])
         
         st.markdown("#### Permissões de Acesso")
         st.markdown("Defina as telas que este perfil poderá acessar:")
@@ -1931,22 +1930,36 @@ def configuracoes():
         
         with col1:
             st.markdown("##### Telas do Sistema")
-            dashboard = st.toggle("📊 Dashboard", value=True)
-            requisicoes = st.toggle("📝 Requisições", value=True)
-            cotacoes = st.toggle("🛒 Cotações", value=True)
-            importacao = st.toggle("✈️ Importação", value=True)
-            configuracoes = st.toggle("⚙️ Configurações", value=True)
+            permissoes = {}
+            permissoes['dashboard'] = st.toggle("📊 Dashboard", 
+                value=st.session_state.get('perfis', {}).get(perfil_selecionado, {}).get('dashboard', True))
+            permissoes['requisicoes'] = st.toggle("📝 Requisições", 
+                value=st.session_state.get('perfis', {}).get(perfil_selecionado, {}).get('requisicoes', True))
+            permissoes['cotacoes'] = st.toggle("🛒 Cotações", 
+                value=st.session_state.get('perfis', {}).get(perfil_selecionado, {}).get('cotacoes', True))
+            permissoes['importacao'] = st.toggle("✈️ Importação", 
+                value=st.session_state.get('perfis', {}).get(perfil_selecionado, {}).get('importacao', False))
+            permissoes['configuracoes'] = st.toggle("⚙️ Configurações", 
+                value=st.session_state.get('perfis', {}).get(perfil_selecionado, {}).get('configuracoes', False))
         
         with col2:
             st.markdown("##### Permissões Administrativas")
-            editar_usuarios = st.toggle("👥 Editar Usuários", value=True)
-            excluir_usuarios = st.toggle("❌ Excluir Usuários", value=True)
-            editar_perfis = st.toggle("🔑 Editar Perfis", value=True)
+            permissoes['editar_usuarios'] = st.toggle("👥 Editar Usuários", 
+                value=st.session_state.get('perfis', {}).get(perfil_selecionado, {}).get('editar_usuarios', False))
+            permissoes['excluir_usuarios'] = st.toggle("❌ Excluir Usuários", 
+                value=st.session_state.get('perfis', {}).get(perfil_selecionado, {}).get('excluir_usuarios', False))
+            permissoes['editar_perfis'] = st.toggle("🔑 Editar Perfis", 
+                value=st.session_state.get('perfis', {}).get(perfil_selecionado, {}).get('editar_perfis', False))
         
         if st.button("💾 Salvar Permissões", type="primary"):
+            if 'perfis' not in st.session_state:
+                st.session_state.perfis = {}
+            st.session_state.perfis[perfil_selecionado] = permissoes
+            with open('perfis.json', 'w') as f:
+                json.dump(st.session_state.perfis, f, indent=4)
             st.success(f"Permissões do perfil {perfil_selecionado} atualizadas com sucesso!")
             st.rerun()
-
+            
     # Seção de Sistema
     if st.session_state.get('config_modo') == 'sistema':
         st.markdown("### Configurações do Sistema")
