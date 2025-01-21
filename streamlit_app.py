@@ -294,41 +294,21 @@ def verificar_arquivos():
         return False
 
 def carregar_usuarios():
-    usuario_padrao = {
-        'ZAQUEU SOUZA': {
-            'senha': None,
-            'perfil': 'administrador',
-            'email': 'zaqueu@jetfrio.com.br',
-            'ativo': True,
-            'primeiro_acesso': True
-        }
-    }
-    
     try:
-        verificar_diretorios()  # Verifica e cria diretórios necessários
-        
-        if not os.path.exists('usuarios.json'):
-            with open('usuarios.json', 'w', encoding='utf-8') as f:
-                json.dump(usuario_padrao, f, ensure_ascii=False, indent=4)
-            print("Arquivo usuarios.json criado com usuário padrão")
-            return usuario_padrao
-        
         with open('usuarios.json', 'r', encoding='utf-8') as f:
             usuarios = json.load(f)
-            if not usuarios:
-                print("Arquivo vazio, retornando usuário padrão")
-                return usuario_padrao
-            
-            if 'ZAQUEU SOUZA' not in usuarios:
-                usuarios['ZAQUEU SOUZA'] = usuario_padrao['ZAQUEU SOUZA']
-                with open('usuarios.json', 'w', encoding='utf-8') as f:
-                    json.dump(usuarios, f, ensure_ascii=False, indent=4)
-            
             return usuarios
-            
-    except Exception as e:
-        print(f"Erro ao carregar usuários: {str(e)}")
-        return usuario_padrao
+    except json.JSONDecodeError:
+        # Retorna usuário padrão em caso de erro
+        return {
+            'ZAQUEU SOUZA': {
+                'senha': None,
+                'perfil': 'administrador',
+                'email': 'zaqueu@jetfrio.com.br',
+                'ativo': True,
+                'primeiro_acesso': True
+            }
+        }
 
 def salvar_usuarios():
     try:
