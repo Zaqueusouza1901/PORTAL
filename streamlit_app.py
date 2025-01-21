@@ -2124,109 +2124,148 @@ def configuracoes():
             st.success(f"Permissões do perfil {perfil_selecionado} atualizadas com sucesso!")
             st.rerun()
 
-    # Seção de Sistema
-    elif st.session_state.get('config_modo') == 'sistema':
-        st.markdown("### Configurações do Sistema")
+# Seção de Sistema
+elif st.session_state.get('config_modo') == 'sistema':
+    st.markdown("### Configurações do Sistema")
+    
+    if st.session_state['perfil'] == 'administrador':
+        tab1, tab2 = st.tabs(["📊 Monitoramento", "⚙️ Personalizar"])
         
-        if st.session_state['perfil'] == 'administrador':
-            tab1, tab2 = st.tabs(["📊 Monitoramento", "⚙️ Personalizar"])
+        with tab1:
+            st.markdown("#### Monitoramento do Sistema")
             
-            with tab1:
-                st.markdown("#### Monitoramento do Sistema")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("##### Desempenho do Sistema")
                 
-                col1, col2 = st.columns(2)
+                import plotly.graph_objects as go
                 
-                with col1:
-                    st.markdown("##### Desempenho do Sistema")
-                    
-                    import plotly.graph_objects as go
-                    
-                    fig = go.Figure(go.Indicator(
-                        mode = "gauge+number+delta",
-                        value = 75,
-                        domain = {'x': [0, 1], 'y': [0, 1]},
-                        title = {'text': "Desempenho"},
-                        number = {'suffix': "%"},
-                        gauge = {
-                            'axis': {'range': [None, 100]},
-                            'bar': {'color': "rgba(0,0,0,0)"},
-                            'steps': [
-                                {'range': [0, 50], 'color': "red"},
-                                {'range': [50, 75], 'color': "yellow"},
-                                {'range': [75, 100], 'color': "green"}
-                            ],
-                            'threshold': {
-                                'line': {'color': "red", 'width': 4},
-                                'thickness': 0.75,
-                                'value': 90
-                            }
+                fig = go.Figure(go.Indicator(
+                    mode = "gauge+number+delta",
+                    value = 75,
+                    domain = {'x': [0, 1], 'y': [0, 1]},
+                    title = {'text': "Desempenho"},
+                    number = {'suffix': "%"},
+                    gauge = {
+                        'axis': {'range': [None, 100]},
+                        'bar': {'color': "rgba(0,0,0,0)"},
+                        'steps': [
+                            {'range': [0, 50], 'color': "red"},
+                            {'range': [50, 75], 'color': "yellow"},
+                            {'range': [75, 100], 'color': "green"}
+                        ],
+                        'threshold': {
+                            'line': {'color': "red", 'width': 4},
+                            'thickness': 0.75,
+                            'value': 90
                         }
-                    ))
-                    
-                    st.plotly_chart(fig)
+                    }
+                ))
                 
-                with col2:
-                    st.markdown("##### Armazenamento de Backup")
-                    fig = mostrar_espaco_armazenamento()
-                    st.plotly_chart(fig)
-                
+                st.plotly_chart(fig)
+            
+            with col2:
+                st.markdown("##### Armazenamento de Backup")
+                fig = mostrar_espaco_armazenamento()
+                st.plotly_chart(fig)
+            
+            # Seção de Visualização e Importação
+            col1, col2 = st.columns(2)
+            
+            with col1:
                 st.markdown("#### Visualização de Dados")
                 if st.button("🔍 Visualizar Dados do Banco", type="primary"):
                     conn = sqlite3.connect('requisicoes.db')
                     df = pd.read_sql_query("SELECT * FROM requisicoes", conn)
                     st.dataframe(df)
                     conn.close()
+            
+            with col2:
+                st.markdown("#### Importação de Dados")
+                uploaded_file = st.file_uploader(
+                    "Selecione o arquivo para importar",
+                    type=['json', 'txt', 'py', 'zip'],
+                    help="Suporta arquivos JSON, TXT, PY e ZIP"
+                )
                 
-                st.markdown("#### Configurações de Backup")
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.markdown("##### Frequência de Backup")
-                    backup_diario = st.toggle("Backup Diário", value=st.session_state.get('backup_diario', False))
-                    backup_semanal = st.toggle("Backup Semanal", value=st.session_state.get('backup_semanal', False))
-                    backup_mensal = st.toggle("Backup Mensal", value=st.session_state.get('backup_mensal', False))
-                
-                with col2:
-                    st.markdown("##### Último Backup")
-                    st.info(f"Data: {get_data_hora_brasil()}")
-                
-                if st.button("🔄 Forçar Backup Agora", type="primary"):
-                    backup_file, backup_size = backup_automatico(st.session_state)
-                    if backup_file:
-                        st.success(f"Backup realizado com sucesso! Tamanho: {backup_size/1024:.2f} MB")
-                
-                # Lista de Backups Disponíveis
-                st.markdown("#### Backups Disponíveis")
-                
-                import os
-                backup_dir = "backups"
-                if os.path.exists(backup_dir):
-                    backup_files = [f for f in os.listdir(backup_dir) if f.endswith('.py') or f.endswith('.zip')]
-                    
-                    if backup_files:
-                        for backup_file in backup_files:
-                            col1, col2, col3 = st.columns([3, 1, 1])
-                            file_path = os.path.join(backup_dir, backup_file)
-                            file_size = os.path.getsize(file_path)
+                if uploaded_file is not None:
+                    if st.button("📥 Importar Dados", type="primary"):
+                        try:
+                            if uploaded_file.name.endswith('.json'):
+                                conteudo = json.loads(uploaded_file.getvalue().decode('utf-8'))
+                                
+                                if 'usuarios' in uploaded_file.name.lower():
+                                    st.session_state.usuarios.update(conteudo)
+                                    salvar_usuarios()
+                                    st.success("Usuários importados com sucesso!")
+                                elif 'requisicoes' in uploaded_file.name.lower():
+                                    if migrar_dados_json_para_sqlite():
+                                        if renumerar_requisicoes():
+                                            st.success("Requisições importadas e renumeradas com sucesso!")
+                                            st.session_state.requisicoes = carregar_requisicoes()
+                                        else:
+                                            st.error("Erro ao renumerar requisições")
+                                    else:
+                                        st.error("Erro ao migrar dados para o banco")
                             
-                            with col1:
-                                st.text(backup_file)
-                            with col2:
-                                st.text(f"{file_size/1024:.2f} KB")
-                            with col3:
-                                with open(file_path, "rb") as f:
-                                    bytes_data = f.read()
-                                    st.download_button(
-                                        label="⬇️",
-                                        data=bytes_data,
-                                        file_name=backup_file,
-                                        mime="application/octet-stream",
-                                        key=f"download_{backup_file}"
-                                    )
-                    else:
-                        st.info("Nenhum arquivo de backup encontrado.")
+                            elif uploaded_file.name.endswith('.zip'):
+                                with zipfile.ZipFile(uploaded_file) as zip_ref:
+                                    zip_ref.extractall('temp_restore')
+                                st.success("Arquivo ZIP extraído com sucesso!")
+                        
+                        except Exception as e:
+                            st.error(f"Erro durante a importação: {str(e)}")
+            
+            # Seção de Backup
+            st.markdown("#### Configurações de Backup")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("##### Frequência de Backup")
+                backup_diario = st.toggle("Backup Diário", value=st.session_state.get('backup_diario', False))
+                backup_semanal = st.toggle("Backup Semanal", value=st.session_state.get('backup_semanal', False))
+                backup_mensal = st.toggle("Backup Mensal", value=st.session_state.get('backup_mensal', False))
+            
+            with col2:
+                st.markdown("##### Último Backup")
+                st.info(f"Data: {get_data_hora_brasil()}")
+            
+            if st.button("🔄 Forçar Backup Agora", type="primary"):
+                backup_file, backup_size = backup_automatico(st.session_state)
+                if backup_file:
+                    st.success(f"Backup realizado com sucesso! Tamanho: {backup_size/1024:.2f} MB")
+            
+            # Lista de Backups
+            st.markdown("#### Backups Disponíveis")
+            backup_dir = "backups"
+            if os.path.exists(backup_dir):
+                backup_files = [f for f in os.listdir(backup_dir) if f.endswith(('.py', '.zip', '.json', '.txt'))]
+                
+                if backup_files:
+                    for backup_file in backup_files:
+                        col1, col2, col3 = st.columns([3, 1, 1])
+                        file_path = os.path.join(backup_dir, backup_file)
+                        file_size = os.path.getsize(file_path)
+                        
+                        with col1:
+                            st.text(backup_file)
+                        with col2:
+                            st.text(f"{file_size/1024:.2f} KB")
+                        with col3:
+                            with open(file_path, "rb") as f:
+                                bytes_data = f.read()
+                                st.download_button(
+                                    label="⬇️",
+                                    data=bytes_data,
+                                    file_name=backup_file,
+                                    mime="application/octet-stream",
+                                    key=f"download_{backup_file}"
+                                )
                 else:
-                    st.warning("Diretório de backup não encontrado.")
+                    st.info("Nenhum arquivo de backup encontrado.")
+            else:
+                st.warning("Diretório de backup não encontrado.")
 
 def main():
     # Inicializar o banco de dados
