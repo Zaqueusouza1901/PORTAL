@@ -558,7 +558,8 @@ def tela_login():
         if usuario in st.session_state.usuarios:
             user_data = st.session_state.usuarios[usuario]
             
-            if user_data.get('primeiro_acesso', True) or user_data.get('senha') is None:
+            # Remover verificação de primeiro_acesso
+            if user_data.get('senha') is None:
                 st.markdown("### 😊 Primeiro Acesso - Configure sua senha")
                 with st.form("primeiro_acesso_form"):
                     nova_senha = st.text_input("Nova Senha", type="password", 
