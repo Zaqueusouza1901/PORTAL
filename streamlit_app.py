@@ -1877,15 +1877,6 @@ def requisicoes():
                                                 st.error("ERRO AO SALVAR A REQUISIÇÃO. TENTE NOVAMENTE.")
 
                                        
-def save_tema(tema):
-    try:
-        with open('tema.json', 'w', encoding='utf-8') as f:
-            json.dump(tema, f, ensure_ascii=False, indent=4)
-        return True
-    except Exception as e:
-        st.error(f"Erro ao salvar tema: {str(e)}")
-        return False
-
 # Seção de Sistema
 elif st.session_state.get('config_modo') == 'sistema':
     st.markdown("### Configurações do Sistema")
