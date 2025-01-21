@@ -2267,3 +2267,6 @@ def main():
             st.info("Funcionalidade em desenvolvimento")
         elif menu == "Configurações":
             configuracoes()
+
+if __name__ == "__main__":
+    main()
