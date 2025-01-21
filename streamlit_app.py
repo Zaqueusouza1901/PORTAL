@@ -2020,43 +2020,6 @@ def configuracoes():
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
-                        try:
-                            if novo_nome != usuario_editar and novo_nome in st.session_state.usuarios:
-                                st.error("Nome de usuário já existe")
-                            else:
-                                if novo_nome != usuario_editar:
-                                    st.session_state.usuarios[novo_nome] = st.session_state.usuarios.pop(usuario_editar)
-                                st.session_state.usuarios[novo_nome].update({
-                                    'email': novo_email,
-                                    'perfil': novo_perfil,
-                                    'ativo': novo_status,
-                                    'permissoes': get_permissoes_perfil(novo_perfil)
-                                })
-                                salvar_usuarios()
-                                st.success("Alterações salvas com sucesso!")
-                                st.rerun()
-                        except Exception as e:   
-                            st.error(f"Erro ao salvar alterações: {str(e)}")
-
-                with col2:
-                    if st.button("🔄 Reset Senha", type="primary", use_container_width=True):
-                        st.session_state.usuarios[novo_nome]['senha'] = None
-                        st.session_state.usuarios[novo_nome]['primeiro_acesso'] = True
-                        salvar_usuarios()
-                        st.success("Senha resetada com sucesso!")
-                        st.rerun()
-
-                with col3:
-                    if st.button("❌ Excluir Usuário", type="primary", use_container_width=True):
-                        if dados_usuario['perfil'] != 'administrador':
-                            st.session_state.usuarios.pop(novo_nome)
-                            salvar_usuarios()
-                            st.success("Usuário excluído com sucesso!")
-                            st.rerun()
-                        else:
-                            st.error("Não é possível excluir um administrador")
-                if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
-                    try:
                         if novo_nome != usuario_editar and novo_nome in st.session_state.usuarios:
                             st.error("Nome de usuário já existe")
                         else:
@@ -2071,8 +2034,6 @@ def configuracoes():
                             salvar_usuarios()
                             st.success("Alterações salvas com sucesso!")
                             st.rerun()
-                    except Exception as e:   
-                        st.error(f"Erro ao salvar alterações: {str(e)}")
 
                 with col2:
                     if st.button("🔄 Reset Senha", type="primary", use_container_width=True):
@@ -2137,7 +2098,7 @@ def configuracoes():
                 key = f"{perfil_selecionado}_{tela}"
                 permissoes[tela] = st.toggle(
                     icone,
-                    value=st.session_state.perfis.get(perfil_selecionado, {}).get(tela, valor_padrao),
+                    value=st.session_state.get('perfis', {}).get(perfil_selecionado, {}).get(tela, valor_padrao),
                     key=key
                 )
         
@@ -2152,7 +2113,7 @@ def configuracoes():
                 key = f"{perfil_selecionado}_{permissao}"
                 permissoes[permissao] = st.toggle(
                     icone,
-                    value=st.session_state.perfis.get(perfil_selecionado, {}).get(permissao, valor_padrao),
+                    value=st.session_state.get('perfis', {}).get(perfil_selecionado, {}).get(permissao, valor_padrao),
                     key=key
                 )
         
@@ -2160,6 +2121,9 @@ def configuracoes():
         with col1:
             if st.button("💾 Salvar Permissões", type="primary", use_container_width=True):
                 try:
+                    if 'perfis' not in st.session_state:
+                        st.session_state.perfis = {}
+                    
                     st.session_state.perfis[perfil_selecionado] = permissoes
                     save_perfis_permissoes(perfil_selecionado, permissoes)
                     st.success(f"Permissões do perfil {perfil_selecionado} atualizadas com sucesso!")
@@ -2167,6 +2131,155 @@ def configuracoes():
                     st.rerun()
                 except Exception as e:
                     st.error(f"Erro ao salvar permissões: {str(e)}")
+            
+    # Seção de Sistema
+    if st.session_state.get('config_modo') == 'sistema':
+        st.markdown("### Configurações do Sistema")
+        
+        if st.session_state['perfil'] == 'administrador':
+            tab1, tab2 = st.tabs(["📊 Monitoramento", "⚙️ Personalizar"])
+            
+            with tab1:
+                st.markdown("#### Monitoramento do Sistema")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("##### Banco de Dados")
+                    try:
+                        conn = sqlite3.connect('database/requisicoes.db')
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT COUNT(*) FROM requisicoes")
+                        total_requisicoes = cursor.fetchone()[0]
+                        
+                        db_size = os.path.getsize('database/requisicoes.db') / (1024 * 1024)
+                        
+                        st.metric("Total de Requisições", total_requisicoes)
+                        st.metric("Tamanho do Banco", f"{db_size:.2f} MB")
+                        conn.close()
+                    except Exception as e:
+                        st.error("Erro ao acessar banco de dados")
+                
+                with col2:
+                    st.markdown("##### Importação de Backup")
+                    uploaded_file = st.file_uploader(
+                        "Selecione o arquivo de backup",
+                        type=['json', 'txt', 'py'],
+                        help="Arquivos suportados: JSON, TXT, PY"
+                    )
+                    
+                    if uploaded_file is not None:
+                        if st.button("📥 Restaurar Backup", type="primary"):
+                            try:
+                                # Backup preventivo
+                                if os.path.exists('database/requisicoes.db'):
+                                    shutil.copy2('database/requisicoes.db', 'backups/pre_restore.db')
+                                
+                                # Processar arquivo baseado na extensão
+                                if uploaded_file.name.endswith('.json'):
+                                    dados = json.loads(uploaded_file.getvalue().decode('utf-8'))
+                                elif uploaded_file.name.endswith('.txt'):
+                                    dados = pd.read_csv(uploaded_file, sep='\t').to_dict('records')
+                                elif uploaded_file.name.endswith('.py'):
+                                    conteudo = uploaded_file.getvalue().decode('utf-8')
+                                    dados_str = conteudo.replace('dados = ', '')
+                                    dados = eval(dados_str)
+                                
+                                # Conectar e inserir dados
+                                conn = sqlite3.connect('database/requisicoes.db')
+                                cursor = conn.cursor()
+                                
+                                for req in dados:
+                                    cursor.execute('''
+                                        INSERT OR REPLACE INTO requisicoes 
+                                        (numero, cliente, vendedor, data_hora, status, items, 
+                                        observacoes_vendedor, comprador_responsavel, data_hora_resposta,
+                                        justificativa_recusa, observacao_geral)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    ''', (
+                                        str(req['numero']),
+                                        req['cliente'],
+                                        req['vendedor'],
+                                        req['data_hora'],
+                                        req['status'],
+                                        req['items'] if isinstance(req['items'], str) else json.dumps(req['items']),
+                                        req.get('observacoes_vendedor', ''),
+                                        req.get('comprador_responsavel', ''),
+                                        req.get('data_hora_resposta', ''),
+                                        req.get('justificativa_recusa', ''),
+                                        req.get('observacao_geral', '')
+                                    ))
+                                
+                                conn.commit()
+                                conn.close()
+                                st.success(f"Backup restaurado com sucesso! {len(dados)} requisições importadas.")
+                                st.rerun()
+                                
+                            except Exception as e:
+                                st.error(f"Erro na restauração: {str(e)}")
+                                if os.path.exists('backups/pre_restore.db'):
+                                    shutil.copy2('backups/pre_restore.db', 'database/requisicoes.db')
+                
+                st.markdown("#### Visualização de Dados")
+                if st.button("🔍 Visualizar Dados do Banco", type="primary"):
+                    try:
+                        conn = sqlite3.connect('database/requisicoes.db')
+                        df = pd.read_sql_query("SELECT * FROM requisicoes", conn)
+                        st.dataframe(df)
+                        conn.close()
+                    except Exception as e:
+                        st.error("Erro ao visualizar dados")
+                
+                if st.button("💾 Backup Manual", type="primary"):
+                    try:
+                        backup_dir = "backups"
+                        if not os.path.exists(backup_dir):
+                            os.makedirs(backup_dir)
+                        
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        
+                        conn = sqlite3.connect('database/requisicoes.db')
+                        df = pd.read_sql_query("SELECT * FROM requisicoes", conn)
+                        
+                        # Salvar como JSON
+                        with open(f'{backup_dir}/backup_{timestamp}.json', 'w', encoding='utf-8') as f:
+                            json.dump(df.to_dict('records'), f, ensure_ascii=False, indent=2)
+                        
+                        conn.close()
+                        st.success("Backup realizado com sucesso!")
+                    except Exception as e:
+                        st.error(f"Erro ao criar backup: {str(e)}")
+                
+                # Lista de Backups
+                st.markdown("#### Backups Disponíveis")
+                backup_dir = "backups"
+                if os.path.exists(backup_dir):
+                    backup_files = [f for f in os.listdir(backup_dir) if f.endswith(('.zip', '.json', '.txt', '.py'))]
+                    
+                    if backup_files:
+                        for backup_file in backup_files:
+                            col1, col2, col3 = st.columns([3, 1, 1])
+                            file_path = os.path.join(backup_dir, backup_file)
+                            file_size = os.path.getsize(file_path)
+                            
+                            with col1:
+                                st.text(backup_file)
+                            with col2:
+                                st.text(f"{file_size/1024:.2f} KB")
+                            with col3:
+                                with open(file_path, "rb") as f:
+                                    bytes_data = f.read()
+                                    st.download_button(
+                                        label="⬇️",
+                                        data=bytes_data,
+                                        file_name=backup_file,
+                                        mime="application/octet-stream",
+                                        key=f"download_{backup_file}"
+                                    )
+                    else:
+                        st.info("Nenhum arquivo de backup encontrado.")
+                else:
+                    st.warning("Diretório de backup não encontrado.")
                     
 def main():
     # Inicializar o banco de dados
