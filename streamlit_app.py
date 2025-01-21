@@ -18,11 +18,10 @@ from streamlit_autorefresh import st_autorefresh
 
 def inicializar_banco():
     try:
-        conn = sqlite3.connect('requisicoes.db')
+        conn = sqlite3.connect('database/requisicoes.db')
         cursor = conn.cursor()
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS requisicoes (
-            numero INTEGER PRIMARY KEY,
+        cursor.execute('''CREATE TABLE IF NOT EXISTS requisicoes
+            (numero TEXT PRIMARY KEY, 
             cliente TEXT,
             vendedor TEXT,
             data_hora TEXT,
@@ -32,14 +31,11 @@ def inicializar_banco():
             comprador_responsavel TEXT,
             data_hora_resposta TEXT,
             justificativa_recusa TEXT,
-            observacao_geral TEXT
-        )
-        ''')
+            observacao_geral TEXT)''')
         conn.commit()
         conn.close()
-        print("Banco de dados inicializado com sucesso")
     except Exception as e:
-        print(f"Erro ao inicializar banco de dados: {str(e)}")
+        st.error(f"Erro ao inicializar banco: {str(e)}")
 
 def mostrar_espaco_armazenamento():
     import plotly.graph_objects as go
