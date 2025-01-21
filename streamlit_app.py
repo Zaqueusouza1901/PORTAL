@@ -218,6 +218,8 @@ def save_perfis_permissoes(perfil, permissoes):
         st.error(f"Erro ao salvar permissões: {str(e)}")
         return False
 
+
+
 def verificar_diretorios():
     diretorios = ['database', 'backups']
     for dir in diretorios:
@@ -228,6 +230,55 @@ def verificar_diretorios():
     if not os.path.exists('database/requisicoes.db'):
         inicializar_banco()
     return True
+
+def importar_dados_antigos():
+    try:
+        # Carregar dados do JSON
+        with open('requisicoes.json', 'r', encoding='utf-8') as file:
+            requisicoes_antigas = json.load(file)
+
+        # Conectar ao banco
+        conn = sqlite3.connect('database/requisicoes.db')
+        cursor = conn.cursor()
+
+        # Inserir dados formatados
+        for req in requisicoes_antigas:
+            items = [{
+                'item': 1,
+                'codigo': req.get('CÓDIGO', ''),
+                'cod_fabricante': '',
+                'descricao': req.get('DESCRIÇÃO', ''),
+                'marca': req.get('MARCA', ''),
+                'quantidade': float(req.get('QUANTIDADE', 0)),
+                'status': 'ABERTA'
+            }]
+            
+            cursor.execute('''
+                INSERT OR REPLACE INTO requisicoes 
+                (numero, cliente, vendedor, data_hora, status, items, 
+                observacoes_vendedor, comprador_responsavel, data_hora_resposta,
+                justificativa_recusa, observacao_geral)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                req.get('REQUISIÇÃO'),
+                req.get('CLIENTE'),
+                req.get('VENDEDOR'),
+                req.get('Data/Hora Criação:'),
+                req.get('STATUS'),
+                json.dumps(items),
+                '',
+                req.get('COMPRADOR', ''),
+                req.get('Data/Hora Resposta:'),
+                '',
+                req.get('OBSERVAÇÕES DO COMPRADOR', '')
+            ))
+
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Erro na importação: {str(e)}")
+        return False
 
 def verificar_arquivos():
     try:
@@ -542,11 +593,13 @@ def inicializar_numero_requisicao():
 # Inicialização de dados
 if 'usuarios' not in st.session_state:
     st.session_state.usuarios = carregar_usuarios()
-    verificar_diretorios()  # Garante que os diretórios necessários existam
+    verificar_diretorios()
     if not os.path.exists('ultimo_numero.json'):
         inicializar_numero_requisicao()
     if 'requisicoes' not in st.session_state:
+        importar_dados_antigos()  # Adicionar esta linha
         st.session_state.requisicoes = carregar_requisicoes()
+
 # Adicionar aqui a inicialização dos perfis
 if 'perfis' not in st.session_state:
     try:
