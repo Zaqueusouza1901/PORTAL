@@ -2247,67 +2247,44 @@ def configuracoes():
                     st.warning("Diretório de backup não encontrado.")
                     
 def main():
-    if 'usuario' not in st.session_state:
-        tela_login()
-        return
-        
-    # Inicialização do banco e verificação de diretórios
-    verificar_diretorios()
+    # Inicializar o banco de dados
     inicializar_banco()
     
-    # Menu lateral
-    with st.sidebar:
-        st.title("Menu")
+    # Adiciona atualização automática a cada 120 segundos
+    st_autorefresh(interval=1200000, key="datarefresh")
+    
+    if 'usuario' not in st.session_state:
+        tela_login()
+    else:
+        # Adicione aqui a mensagem fixa
+        col1, col2 = st.columns([3,1])
+        with col2:
+            st.markdown(f"""
+                <div style='
+                    background-color: var(--background-color);
+                    padding: 8px;
+                    border-radius: 4px;
+                    font-size: 12px;
+                    text-align: right;
+                    color: var(--text-color);'>
+                    🔄 Última atualização: {get_data_hora_brasil()}
+                </div>
+            """, unsafe_allow_html=True)
         
-        # Mensagem fixa no topo
-        st.markdown("""
-            <div style='background-color: #f0f2f6; padding: 10px; border-radius: 5px; margin-bottom: 10px;'>
-                <p style='margin: 0; color: #2D2C74; font-size: 14px; text-align: center;'>
-                    PORTAL DE REQUISIÇÕES<br>JETFRIO REFRIGERAÇÃO
-                </p>
-            </div>
-        """, unsafe_allow_html=True)
+        menu = menu_lateral()
         
-        # Verifica permissões do usuário
-        perfil = st.session_state.get('perfil')
-        permissoes = st.session_state.get('perfis', {}).get(perfil, {})
-        
-        # Botões do menu com verificação de permissão
-        if permissoes.get('dashboard', True):
-            if st.button("📊 Dashboard"):
-                st.session_state.pagina = 'dashboard'
-            
-        if permissoes.get('requisicoes', True):
-            if st.button("📝 Requisições"):
-                st.session_state.pagina = 'requisicoes'
-            
-        if permissoes.get('cotacoes', True):
-            if st.button("🛒 Cotações"):
-                st.session_state.pagina = 'cotacoes'
-            
-        if permissoes.get('importacao', True):
-            if st.button("✈️ Importação"):
-                st.session_state.pagina = 'importacao'
-            
-        if permissoes.get('configuracoes', True):
-            if st.button("⚙️ Configurações"):
-                st.session_state.pagina = 'configuracoes'
-        
-        # Informações do usuário e botão de logout
-        st.markdown(
-            f"""
-            <div class="user-info">
-                <p style='margin: 0; font-size: 0.9rem;'>👤 <b>Usuário:</b> {st.session_state.get('usuario', '')}</p>
-                <p style='margin: 0; font-size: 0.9rem;'>🔑 <b>Perfil:</b> {st.session_state.get('perfil', '').title()}</p>
-            </div>
-            """, 
-            unsafe_allow_html=True
-        )
-        
-        if st.button("🚪 Sair", key="logout_button"):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
+        if menu == "Dashboard":
+            dashboard()
+        elif menu == "Requisições":
+            requisicoes()
+        elif menu == "Cotações":
+            st.title("Cotações")
+            st.info("Funcionalidade em desenvolvimento")
+        elif menu == "Importação":
+            st.title("Importação")
+            st.info("Funcionalidade em desenvolvimento")
+        elif menu == "Configurações":
+            configuracoes()
 
 if __name__ == "__main__":
     main()
