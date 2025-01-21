@@ -2232,12 +2232,6 @@ def main():
     # Inicializar o banco de dados
     inicializar_banco()
     
-    # Executar migração e renumeração
-    if migrar_dados_json_para_sqlite():
-        st.success("Migração concluída com sucesso")
-        if renumerar_requisicoes():
-            st.success("Renumeração concluída com sucesso")
-    
     # Adiciona atualização automática a cada 120 segundos
     st_autorefresh(interval=1200000, key="datarefresh")
     
