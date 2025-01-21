@@ -1745,6 +1745,243 @@ def requisicoes():
                                             else:
                                                 st.error("ERRO AO SALVAR A REQUISIÇÃO. TENTE NOVAMENTE.")
 
+def configuracoes():
+    st.title("Configurações")
+    
+    if st.session_state['perfil'] in ['administrador', 'comprador']:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("👥 Usuários", type="primary", use_container_width=True):
+                st.session_state['config_modo'] = 'usuarios'
+                st.rerun()
+        with col2:
+            if st.button("🔑 Perfis", type="primary", use_container_width=True):
+                st.session_state['config_modo'] = 'perfis'
+                st.rerun()
+        with col3:
+            if st.button("⚙️ Sistema", type="primary", use_container_width=True):
+                st.session_state['config_modo'] = 'sistema'
+                st.rerun()
+    else:
+        st.session_state['config_modo'] = 'sistema'
+
+    if st.session_state.get('config_modo') == 'usuarios' and st.session_state['perfil'] == 'administrador':
+        st.markdown("""
+            <style>
+            .stButton > button {
+                background-color: #2D2C74 !important;
+                color: white !important;
+                border-radius: 4px !important;
+                padding: 0.5rem 1rem !important;
+                border: none !important;
+            }
+            .stButton > button:hover {
+                background-color: #1B81C5 !important;
+            }
+            div[data-testid="stForm"] {
+                background-color: #f8f9fa;
+                padding: 1rem;
+                border-radius: 8px;
+                margin-bottom: 1rem;
+            }
+            [data-testid="baseButton-secondary"] {
+                background-color: #2D2C74 !important;
+                color: white !important;
+            }
+            [data-testid="baseButton-secondary"]:hover {
+                background-color: #1B81C5 !important;
+            }
+            </style>
+        """, unsafe_allow_html=True)
+
+        st.markdown("### Gerenciamento de Usuários")
+        
+        if st.button("➕ Cadastrar Novo Usuário", type="primary", use_container_width=True):
+            st.session_state['modo_usuario'] = 'cadastrar'
+            st.rerun()
+
+        if st.session_state.get('modo_usuario') == 'cadastrar':
+            with st.form("cadastro_usuario"):
+                st.subheader("Cadastrar Novo Usuário")
+                
+                col1, col2, col3 = st.columns([2,2,1])
+                with col1:
+                    novo_usuario = st.text_input("Nome do Usuário").upper()
+                with col2:
+                    email = st.text_input("Email")
+                with col3:
+                    perfil = st.selectbox("Perfil", ['vendedor', 'comprador', 'administrador'])
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.form_submit_button("💾 Salvar", type="primary", use_container_width=True):
+                        if novo_usuario and email:
+                            if novo_usuario not in st.session_state.usuarios:
+                                st.session_state.usuarios[novo_usuario] = {
+                                    'senha': None,
+                                    'perfil': perfil,
+                                    'email': email,
+                                    'ativo': True,
+                                    'primeiro_acesso': True,
+                                    'permissoes': get_permissoes_perfil(perfil)
+                                }
+                                salvar_usuarios()
+                                st.success("Usuário cadastrado com sucesso!")
+                                st.session_state['modo_usuario'] = None
+                                st.rerun()
+                            else:
+                                st.error("Usuário já existe")
+                        else:
+                            st.error("Preencha todos os campos")
+                
+                with col2:
+                    if st.form_submit_button("❌ Cancelar", type="primary", use_container_width=True):
+                        st.session_state['modo_usuario'] = None
+                        st.rerun()
+
+        usuarios_filtrados = st.session_state.usuarios
+
+        if usuarios_filtrados:
+            st.markdown("#### Editar Usuário")
+            usuario_editar = st.selectbox("Selecionar usuário para editar:", list(usuarios_filtrados.keys()))
+            
+            if usuario_editar:
+                dados_usuario = st.session_state.usuarios[usuario_editar]
+                col1, col2, col3, col4 = st.columns([2,2,1,1])
+                
+                with col1:
+                    novo_nome = st.text_input("Nome", value=usuario_editar).upper()
+                with col2:
+                    novo_email = st.text_input("Email", value=dados_usuario['email'])
+                with col3:
+                    novo_perfil = st.selectbox("Perfil", 
+                                             options=['vendedor', 'comprador', 'administrador'],
+                                             index=['vendedor', 'comprador', 'administrador'].index(dados_usuario['perfil']))
+                with col4:
+                    novo_status = st.toggle("Ativo", value=dados_usuario['ativo'])
+
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
+                        if novo_nome != usuario_editar and novo_nome in st.session_state.usuarios:
+                            st.error("Nome de usuário já existe")
+                        else:
+                            if novo_nome != usuario_editar:
+                                st.session_state.usuarios[novo_nome] = st.session_state.usuarios.pop(usuario_editar)
+                            st.session_state.usuarios[novo_nome].update({
+                                'email': novo_email,
+                                'perfil': novo_perfil,
+                                'ativo': novo_status,
+                                'permissoes': get_permissoes_perfil(novo_perfil)
+                            })
+                            salvar_usuarios()
+                            st.success("Alterações salvas com sucesso!")
+                            st.rerun()
+
+                with col2:
+                    if st.button("🔄 Reset Senha", type="primary", use_container_width=True):
+                        st.session_state.usuarios[novo_nome]['senha'] = None
+                        st.session_state.usuarios[novo_nome]['primeiro_acesso'] = True
+                        salvar_usuarios()
+                        st.success("Senha resetada com sucesso!")
+                        st.rerun()
+
+                with col3:
+                    if st.button("❌ Excluir Usuário", type="primary", use_container_width=True):
+                        if dados_usuario['perfil'] != 'administrador':
+                            st.session_state.usuarios.pop(novo_nome)
+                            salvar_usuarios()
+                            st.success("Usuário excluído com sucesso!")
+                            st.rerun()
+                        else:
+                            st.error("Não é possível excluir um administrador")
+
+        st.markdown("#### Usuários Cadastrados")
+        usuarios_df = pd.DataFrame([{
+            'Usuário': usuario,
+            'Email': dados['email'],
+            'Perfil': dados['perfil'],
+            'Status': '🟢 Ativo' if dados['ativo'] else '🔴 Inativo'
+        } for usuario, dados in st.session_state.usuarios.items()])
+
+        st.dataframe(
+            usuarios_df,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Usuário": st.column_config.TextColumn("Usuário", width="medium"),
+                "Email": st.column_config.TextColumn("Email", width="medium"),
+                "Perfil": st.column_config.TextColumn("Perfil", width="small"),
+                "Status": st.column_config.TextColumn("Status", width="small")
+            }
+        )
+
+    # Seção de Perfis
+    elif st.session_state.get('config_modo') == 'perfis':
+        st.markdown("### Gerenciamento de Perfis")
+        
+        perfis = ['vendedor', 'comprador', 'administrador']
+        perfil_selecionado = st.selectbox("Selecione o perfil para editar", perfis)
+        
+        st.markdown("#### Permissões de Acesso")
+        st.markdown("Defina as telas que este perfil poderá acessar:")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            permissoes = {}
+            permissoes_atuais = get_permissoes_perfil(perfil_selecionado)
+            
+            st.markdown("##### Telas do Sistema")
+            permissoes['dashboard'] = st.toggle(
+                "📊 Dashboard",
+                value='dashboard' in permissoes_atuais,
+                key=f"perm_dashboard_{perfil_selecionado}"
+            )
+            permissoes['requisicoes'] = st.toggle(
+                "📝 Requisições",
+                value='requisicoes' in permissoes_atuais,
+                key=f"perm_requisicoes_{perfil_selecionado}"
+            )
+            permissoes['cotacoes'] = st.toggle(
+                "🛒 Cotações",
+                value='cotacoes' in permissoes_atuais,
+                key=f"perm_cotacoes_{perfil_selecionado}"
+            )
+            permissoes['importacao'] = st.toggle(
+                "✈️ Importação",
+                value='importacao' in permissoes_atuais,
+                key=f"perm_importacao_{perfil_selecionado}"
+            )
+            permissoes['configuracoes'] = st.toggle(
+                "⚙️ Configurações",
+                value='configuracoes' in permissoes_atuais,
+                key=f"perm_configuracoes_{perfil_selecionado}"
+            )
+        
+        with col2:
+            st.markdown("##### Permissões Administrativas")
+            permissoes['editar_usuarios'] = st.toggle(
+                "👥 Editar Usuários",
+                value='editar_usuarios' in permissoes_atuais,
+                key=f"perm_editar_usuarios_{perfil_selecionado}"
+            )
+            permissoes['excluir_usuarios'] = st.toggle(
+                "❌ Excluir Usuários",
+                value='excluir_usuarios' in permissoes_atuais,
+                key=f"perm_excluir_usuarios_{perfil_selecionado}"
+            )
+            permissoes['editar_perfis'] = st.toggle(
+                "🔑 Editar Perfis",
+                value='editar_perfis' in permissoes_atuais,
+                key=f"perm_editar_perfis_{perfil_selecionado}"
+            )
+
+        if st.button("💾 Salvar Permissões", type="primary"):
+            novas_permissoes = [k for k, v in permissoes.items() if v]
+            save_perfis_permissoes(perfil_selecionado, novas_permissoes)
+            st.success(f"Permissões do perfil {perfil_selecionado} atualizadas com sucesso!")
+            st.rerun()
                                        
 # Seção de Sistema
 elif st.session_state.get('config_modo') == 'sistema':
