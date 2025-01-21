@@ -1889,28 +1889,60 @@ def save_tema(tema):
 def configuracoes():
     st.title("Configurações")
     
-    # Menu de configurações
-    if st.session_state['perfil'] in ['administrador', 'comprador']:
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            if st.button("👥 Usuários", type="primary", use_container_width=True):
-                st.session_state['config_modo'] = 'usuarios'
-                st.rerun()
-        with col2:
-            if st.button("🔑 Perfis", type="primary", use_container_width=True):
-                st.session_state['config_modo'] = 'perfis'
-                st.rerun()
-        with col3:
-            if st.button("⚙️ Sistema", type="primary", use_container_width=True):
-                st.session_state['config_modo'] = 'sistema'
-                st.rerun()
-    
-    # Seções de configuração
-    if st.session_state.get('config_modo') == 'usuarios' and st.session_state['perfil'] == 'administrador':
-        configuracoes_usuarios()
-    elif st.session_state.get('config_modo') == 'perfis':
-        configuracoes_perfis()
-    elif st.session_state.get('config_modo') == 'sistema':
+    def configuracoes_usuarios():
+        st.markdown("### Configurações de Usuários")
+        
+        # Lista de usuários atual
+        st.markdown("#### Usuários Cadastrados")
+        if 'usuarios' in st.session_state:
+            for usuario, dados in st.session_state.usuarios.items():
+                col1, col2, col3 = st.columns([2,2,1])
+                with col1:
+                    st.text(f"Usuário: {usuario}")
+                with col2:
+                    st.text(f"Perfil: {dados['perfil']}")
+                with col3:
+                    if usuario != st.session_state['usuario']:
+                        if st.button("🗑️", key=f"del_{usuario}"):
+                            del st.session_state.usuarios[usuario]
+                            salvar_usuarios()
+                            st.rerun()
+        
+        # Formulário para novo usuário
+        st.markdown("#### Adicionar Novo Usuário")
+        with st.form("novo_usuario"):
+            novo_usuario = st.text_input("Nome de Usuário")
+            nova_senha = st.text_input("Senha", type="password")
+            novo_perfil = st.selectbox("Perfil", ['vendedor', 'comprador', 'administrador'])
+            
+            if st.form_submit_button("Adicionar Usuário"):
+                if novo_usuario and nova_senha:
+                    st.session_state.usuarios[novo_usuario] = {
+                        'senha': nova_senha,
+                        'perfil': novo_perfil
+                    }
+                    salvar_usuarios()
+                    st.success("Usuário adicionado com sucesso!")
+                    st.rerun()
+
+    def configuracoes_perfis():
+        st.markdown("### Configurações de Perfis")
+        
+        # Exibir perfis existentes
+        st.markdown("#### Perfis do Sistema")
+        perfis = {
+            'vendedor': ['Criar requisições', 'Visualizar próprias requisições'],
+            'comprador': ['Visualizar todas requisições', 'Responder requisições'],
+            'administrador': ['Acesso total ao sistema', 'Gerenciar usuários', 'Configurações avançadas']
+        }
+        
+        for perfil, permissoes in perfis.items():
+            st.markdown(f"**{perfil.title()}**")
+            for permissao in permissoes:
+                st.text(f"• {permissao}")
+            st.markdown("---")
+
+    def configuracoes_sistema():
         st.markdown("### Configurações do Sistema")
         
         if st.session_state['perfil'] == 'administrador':
@@ -2051,6 +2083,30 @@ def configuracoes():
                         st.info("Nenhum arquivo de backup encontrado.")
                 else:
                     st.warning("Diretório de backup não encontrado.")
+    
+    # Menu de configurações
+    if st.session_state['perfil'] in ['administrador', 'comprador']:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("👥 Usuários", type="primary", use_container_width=True):
+                st.session_state['config_modo'] = 'usuarios'
+                st.rerun()
+        with col2:
+            if st.button("🔑 Perfis", type="primary", use_container_width=True):
+                st.session_state['config_modo'] = 'perfis'
+                st.rerun()
+        with col3:
+            if st.button("⚙️ Sistema", type="primary", use_container_width=True):
+                st.session_state['config_modo'] = 'sistema'
+                st.rerun()
+    
+    # Seções de configuração
+    if st.session_state.get('config_modo') == 'usuarios' and st.session_state['perfil'] == 'administrador':
+        configuracoes_usuarios()
+    elif st.session_state.get('config_modo') == 'perfis':
+        configuracoes_perfis()
+    elif st.session_state.get('config_modo') == 'sistema':
+        configuracoes_sistema()
 
 def main():
     # Inicializar o banco de dados
