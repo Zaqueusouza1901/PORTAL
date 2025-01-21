@@ -1930,57 +1930,20 @@ def configuracoes():
         col1, col2 = st.columns(2)
         
         with col1:
-            permissoes = {}
-            permissoes_atuais = get_permissoes_perfil(perfil_selecionado)
-            
             st.markdown("##### Telas do Sistema")
-            permissoes['dashboard'] = st.toggle(
-                "📊 Dashboard",
-                value='dashboard' in permissoes_atuais,
-                key=f"perm_dashboard_{perfil_selecionado}"
-            )
-            permissoes['requisicoes'] = st.toggle(
-                "📝 Requisições",
-                value='requisicoes' in permissoes_atuais,
-                key=f"perm_requisicoes_{perfil_selecionado}"
-            )
-            permissoes['cotacoes'] = st.toggle(
-                "🛒 Cotações",
-                value='cotacoes' in permissoes_atuais,
-                key=f"perm_cotacoes_{perfil_selecionado}"
-            )
-            permissoes['importacao'] = st.toggle(
-                "✈️ Importação",
-                value='importacao' in permissoes_atuais,
-                key=f"perm_importacao_{perfil_selecionado}"
-            )
-            permissoes['configuracoes'] = st.toggle(
-                "⚙️ Configurações",
-                value='configuracoes' in permissoes_atuais,
-                key=f"perm_configuracoes_{perfil_selecionado}"
-            )
+            dashboard = st.toggle("📊 Dashboard", value=True)
+            requisicoes = st.toggle("📝 Requisições", value=True)
+            cotacoes = st.toggle("🛒 Cotações", value=True)
+            importacao = st.toggle("✈️ Importação", value=True)
+            configuracoes = st.toggle("⚙️ Configurações", value=True)
         
         with col2:
             st.markdown("##### Permissões Administrativas")
-            permissoes['editar_usuarios'] = st.toggle(
-                "👥 Editar Usuários",
-                value='editar_usuarios' in permissoes_atuais,
-                key=f"perm_editar_usuarios_{perfil_selecionado}"
-            )
-            permissoes['excluir_usuarios'] = st.toggle(
-                "❌ Excluir Usuários",
-                value='excluir_usuarios' in permissoes_atuais,
-                key=f"perm_excluir_usuarios_{perfil_selecionado}"
-            )
-            permissoes['editar_perfis'] = st.toggle(
-                "🔑 Editar Perfis",
-                value='editar_perfis' in permissoes_atuais,
-                key=f"perm_editar_perfis_{perfil_selecionado}"
-            )
-
+            editar_usuarios = st.toggle("👥 Editar Usuários", value=True)
+            excluir_usuarios = st.toggle("❌ Excluir Usuários", value=True)
+            editar_perfis = st.toggle("🔑 Editar Perfis", value=True)
+        
         if st.button("💾 Salvar Permissões", type="primary"):
-            novas_permissoes = [k for k, v in permissoes.items() if v]
-            save_perfis_permissoes(perfil_selecionado, novas_permissoes)
             st.success(f"Permissões do perfil {perfil_selecionado} atualizadas com sucesso!")
             st.rerun()
 
