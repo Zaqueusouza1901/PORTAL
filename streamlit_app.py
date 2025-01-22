@@ -2029,7 +2029,6 @@ def configuracoes():
                                 'email': novo_email,
                                 'perfil': novo_perfil,
                                 'ativo': novo_status,
-                                'permissoes': permissoes
                                 'permissoes': get_permissoes_perfil(novo_perfil)
                             })
                             salvar_usuarios()
