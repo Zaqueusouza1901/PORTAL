@@ -183,6 +183,9 @@ def enviar_email_requisicao(requisicao, tipo_notificacao):
         with smtplib.SMTP(EMAIL_CONFIG['SMTP_SERVER'], EMAIL_CONFIG['SMTP_PORT']) as server:
             server.starttls()
             server.login(EMAIL_CONFIG['EMAIL'], EMAIL_CONFIG['PASSWORD'])
+            destinatarios = [vendedor_email]
+            if comprador_email:
+                destinatarios.append(comprador_email)
             server.send_message(msg)
         
         return True
