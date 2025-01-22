@@ -1063,17 +1063,6 @@ def nova_requisicao():
     with col2:
         st.write(f"**VENDEDOR:** {st.session_state.get('usuario', '')}")
 
-    # Uploader de arquivos
-    uploaded_files = st.file_uploader("Anexar arquivos (opcional)", 
-                                    accept_multiple_files=True,
-                                    type=['pdf', 'txt', 'jpg', 'jpeg', 'png', 'xls', 'xlsx'])
-
-    # Exibir arquivos anexados
-    if uploaded_files:
-        st.write("Arquivos anexados:")
-        for file in uploaded_files:
-            st.write(f"- {file.name} ({file.type})")
-    
     col1, col2 = st.columns(2)
     with col2:
         if st.button("❌ CANCELAR", type="secondary", use_container_width=True):
@@ -1344,8 +1333,7 @@ def nova_requisicao():
                     'data_hora': get_data_hora_brasil(),
                     'status': 'ABERTA',
                     'items': st.session_state.items_temp.copy(),
-                    'observacoes_vendedor': observacoes_vendedor,
-                    'anexos': [{'nome': file.name, 'tipo': file.type, 'conteudo': file.getvalue()} for file in uploaded_files] if uploaded_files else []
+                    'observacoes_vendedor': observacoes_vendedor
                 }
                 
                 if salvar_requisicao(nova_req):
@@ -1785,34 +1773,6 @@ def requisicoes():
                                         <p style='margin: 0 0 5px 0; color: var(--text-color);'>{}</p>
                                     </div>
                                 """.format(req['observacoes_vendedor']), unsafe_allow_html=True)
-                                
-                            # Exibição dos anexos
-                            if req.get('anexos'):
-                                st.markdown("""
-                                    <div style='background-color: var(--background-color);
-                                              border-radius: 4px; 
-                                              padding: 10px; 
-                                              margin: 10px 0 0px 0; 
-                                              border-left: 4px solid #1B81C5;
-                                              border: 1px solid var(--secondary-background-color);'>
-                                        <p style='color: var(--text-color); 
-                                                  font-weight: bold; 
-                                                  margin-bottom: 10px;'>ANEXOS:</p>
-                                """, unsafe_allow_html=True)
-                                
-                                for anexo in req['anexos']:
-                                    col1, col2 = st.columns([4,1])
-                                    with col1:
-                                        st.write(f"📎 {anexo['nome']}")
-                                    with col2:
-                                        st.download_button(
-                                            label="⬇️ Baixar",
-                                            data=anexo['conteudo'],
-                                            file_name=anexo['nome'],
-                                            mime=anexo['tipo']
-                                        )
-                                
-                                st.markdown("</div>", unsafe_allow_html=True)
 
                             # Exibição da justificativa de recusa
                             if req['status'] == 'RECUSADA':
@@ -1941,6 +1901,7 @@ def requisicoes():
                                                 st.rerun()
                                             else:
                                                 st.error("ERRO AO SALVAR A REQUISIÇÃO. TENTE NOVAMENTE.")
+
 def configuracoes():
     st.title("Configurações")
     
