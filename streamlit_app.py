@@ -1302,9 +1302,20 @@ def nova_requisicao():
                 }
                 
                 if salvar_requisicao(nova_req):
-                    st.session_state.requisicoes = carregar_requisicoes()
-                    st.rerun()
+                    # Limpar os dados temporários
+                    st.session_state.items_temp = []
+                    st.session_state['modo_requisicao'] = None
 
+                    # Atualizar a lista de requisições
+                    st.session_state.requisicoes = carregar_requisicoes()
+
+                    # Exibir toast de sucesso
+                    st.toast('Requisição enviada com sucesso!', icon='✅')
+                    
+                    # Aguardar brevemente antes de recarregar
+                    time.sleep(1)
+                    st.rerun()
+                
 def salvar_configuracoes():
     try:
         with open('configuracoes.json', 'w') as f:
