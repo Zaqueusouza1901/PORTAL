@@ -1546,9 +1546,12 @@ def nova_requisicao():
         if st.button("➕", key=f"add_{proximo_item}"):
             if not descricao:
                 st.session_state['show_desc_error'] = True
-                st.rerun()
-            else:
+                st.rerun()            else:
                 try:
+                    # Converte mantendo a formatação com vírgula
+                    quantidade = quantidade.strip()
+                    if quantidade.startswith('0') and len(quantidade) > 1 and quantidade[1] != ',':
+                        quantidade = quantidade.lstrip('0')
                     qtd = float(quantidade.replace(',', '.'))
                     novo_item = {
                         'item': proximo_item,
@@ -1556,7 +1559,7 @@ def nova_requisicao():
                         'cod_fabricante': cod_fabricante,
                         'descricao': descricao,
                         'marca': marca,
-                        'quantidade': qtd,
+                        'quantidade': quantidade,  # Mantém o valor original com vírgula
                         'status': 'ABERTA'
                     }
                     st.session_state.items_temp.append(novo_item)
