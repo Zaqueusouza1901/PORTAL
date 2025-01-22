@@ -1868,10 +1868,10 @@ def requisicoes():
             if req['status'] in selected_status:
                 st.markdown(f"""
                     <div class="requisicao-card" style="background-color: {
-                        'rgba(46, 204, 113, 0.1)' if req['status'] == 'ABERTA'
-                        else 'rgba(241, 196, 15, 0.1)' if req['status'] == 'EM ANDAMENTO'
-                        else 'rgba(52, 152, 219, 0.1)' if req['status'] == 'FINALIZADA'
-                        else 'rgba(231, 76, 60, 0.1)' if req['status'] == 'RECUSADA'
+                        'rgba(46, 204, 113, 0.2)' if req['status'] == 'ABERTA'
+                        else 'rgba(241, 196, 15, 0.2)' if req['status'] == 'EM ANDAMENTO'
+                        else 'rgba(52, 152, 219, 0.2)' if req['status'] == 'FINALIZADA'
+                        else 'rgba(231, 76, 60, 0.2)' if req['status'] == 'RECUSADA'
                         else 'var(--background-color)'};
                         color: var(--text-color)">
                         <div class="requisicao-info" style="color: var(--text-color)">
