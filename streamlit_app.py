@@ -632,42 +632,96 @@ def listar_backups(backup_dir='backups/'):
     if not os.path.exists(backup_dir):
         os.makedirs(backup_dir)
         
-    st.title("Backups Disponíveis")
+    st.title("Gerenciamento de Backups")
     
     # Lista e ordena backups
     backups = []
     for arquivo in os.listdir(backup_dir):
         if arquivo.startswith('backup_') and (arquivo.endswith('.zip') or arquivo.endswith('.json')):
             caminho_arquivo = os.path.join(backup_dir, arquivo)
-            tamanho = os.path.getsize(caminho_arquivo) / 1024  # Tamanho em KB
+            tamanho = os.path.getsize(caminho_arquivo) / (1024 * 1024)  # Tamanho em MB
             data_criacao = datetime.fromtimestamp(os.path.getctime(caminho_arquivo))
             tipo = 'AUTOMÁTICO' if 'auto' in arquivo else 'MANUAL'
             
             backups.append({
                 'nome': arquivo,
                 'data_hora': data_criacao.strftime('%d/%m/%Y %H:%M:%S'),
-                'tamanho': f"{tamanho:.2f} KB",
+                'tamanho': f"{tamanho:.2f} MB",
                 'tipo': tipo,
                 'caminho': caminho_arquivo
             })
     
     # Ordena por data mais recente
-    backups.sort(key=lambda x: x['data_hora'], reverse=True)
+    backups.sort(key=lambda x: datetime.strptime(x['data_hora'], '%d/%m/%Y %H:%M:%S'), reverse=True)
     
     # Mostra último backup realizado
     if backups:
         ultimo_backup = backups[0]
-        st.info(f"Último backup: {ultimo_backup['data_hora']} - {ultimo_backup['tipo']}")
+        st.info(f"🔄 Último backup: {ultimo_backup['data_hora']} - {ultimo_backup['tipo']}")
     
-    # Lista backups em formato de tabela
+    # Criar tabela de backups
+    st.markdown("### Backups Disponíveis")
+    st.markdown("""
+        <style>
+        .backup-table {
+            width: 100%;
+            margin-bottom: 1rem;
+            background-color: var(--background-color);
+            border-radius: 0.5rem;
+            overflow: hidden;
+        }
+        .backup-row {
+            display: flex;
+            padding: 0.75rem;
+            border-bottom: 1px solid var(--secondary-background-color);
+            align-items: center;
+        }
+        .backup-info {
+            flex: 1;
+        }
+        .backup-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+        .backup-type {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+        .backup-type-auto {
+            background-color: #e3f2fd;
+            color: #1976d2;
+        }
+        .backup-type-manual {
+            background-color: #fff3e0;
+            color: #f57c00;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    
     for backup in backups:
-        col1, col2, col3 = st.columns([3, 1, 1])
+        col1, col2, col3 = st.columns([3, 2, 1])
         with col1:
-            st.text(f"{backup['nome']} ({backup['tamanho']})")
+            st.markdown(f"""
+                <div class='backup-row'>
+                    <div class='backup-info'>
+                        <div><strong>{backup['nome']}</strong></div>
+                        <div style='color: var(--text-color); opacity: 0.7;'>
+                            {backup['data_hora']} • {backup['tamanho']}
+                        </div>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
         with col2:
-            st.text(f"{backup['tipo']} - {backup['data_hora']}")
+            st.markdown(f"""
+                <div class='backup-type backup-type-{'auto' if backup['tipo'] == 'AUTOMÁTICO' else 'manual'}'>
+                    {backup['tipo']}
+                </div>
+            """, unsafe_allow_html=True)
         with col3:
-            if st.button("🗑️", key=f"delete_{backup['nome']}"):
+            if st.button("🗑️", key=f"delete_{backup['nome']}", help="Excluir backup"):
                 try:
                     os.remove(backup['caminho'])
                     st.success("Backup removido com sucesso!")
