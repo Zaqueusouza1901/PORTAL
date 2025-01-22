@@ -1630,11 +1630,6 @@ def requisicoes():
                                     req['comprador_responsavel'] = st.session_state['usuario']
                                     req['data_hora_aceite'] = get_data_hora_brasil()
                                     if salvar_requisicao(req):
-                                        enviar_notificacao(
-                                            f"Requisição {req['numero']} Aceita",
-                                            f"{st.session_state['usuario']} aceitou a requisição Nº{req['numero']} para o cliente {req['cliente']}",
-                                            req['numero']
-                                        )
                                         st.success("Requisição aceita com sucesso!")
                                         st.rerun()
                             with col3:
