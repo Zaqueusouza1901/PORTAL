@@ -591,16 +591,30 @@ def enviar_email(destinatario, assunto, mensagem):
 
 def get_next_requisition_number():
     try:
-        with open('ultimo_numero.json', 'r') as f:
-            ultimo_numero = json.load(f)
-            proximo_numero = ultimo_numero['numero'] + 1
-    except FileNotFoundError:
-        proximo_numero = 5000
-    
-    with open('ultimo_numero.json', 'w') as f:
-        json.dump({'numero': proximo_numero}, f)
-    
-    return proximo_numero
+        # Conecta ao banco de dados
+        conn = sqlite3.connect('database/requisicoes.db')
+        cursor = conn.cursor()
+        
+        # Busca o maior número de requisição atual
+        cursor.execute('SELECT MAX(CAST(numero AS INTEGER)) FROM requisicoes')
+        ultimo_numero = cursor.fetchone()[0]
+        
+        # Se não houver registros, começa do 5000
+        if not ultimo_numero:
+            proximo_numero = 5000
+        else:
+            proximo_numero = int(ultimo_numero) + 1
+            
+        # Atualiza o arquivo de controle
+        with open('ultimo_numero.json', 'w') as f:
+            json.dump({'numero': proximo_numero}, f)
+            
+        conn.close()
+        return proximo_numero
+        
+    except Exception as e:
+        st.error(f"Erro ao gerar número da requisição: {str(e)}")
+        return None
 
 def inicializar_numero_requisicao():
     try:
