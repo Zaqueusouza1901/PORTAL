@@ -1320,7 +1320,6 @@ def nova_requisicao():
         mostrar_obs = st.checkbox("INCLUIR OBSERVAÇÕES")
         
         # Campo de observações só aparece se o checkbox estiver marcado
-        # Campo de observações só aparece se o checkbox estiver marcado
         if mostrar_obs:
             st.markdown("### OBSERVAÇÕES")
             col1, col2 = st.columns([3,1])
