@@ -1,5 +1,6 @@
 import streamlit as st
 import sqlite3
+import hashlib
 import pandas as pd
 import time
 import zipfile
@@ -15,6 +16,101 @@ import plotly.graph_objects as go
 import shutil
 import glob
 from streamlit_autorefresh import st_autorefresh
+
+def gerar_hash_senha(senha):
+    return hashlib.sha256(senha.encode()).hexdigest()
+
+def inicializar_banco_usuarios():
+    os.makedirs('database', exist_ok=True)
+    conn = sqlite3.connect('database/usuarios.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS usuarios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nome TEXT NOT NULL UNIQUE,
+        email TEXT NOT NULL,
+        senha TEXT,
+        perfil TEXT NOT NULL,
+        ativo BOOLEAN NOT NULL DEFAULT 1,
+        primeiro_acesso BOOLEAN NOT NULL DEFAULT 1,
+        token_sessao TEXT,
+        data_ultimo_acesso TEXT,
+        data_criacao TEXT NOT NULL,
+        data_modificacao TEXT
+    )
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+def inicializar_sistema():
+    try:
+        # Criar diretórios necessários
+        os.makedirs('database', exist_ok=True)
+        os.makedirs('backups', exist_ok=True)
+        
+        # Inicializar bancos
+        inicializar_banco_usuarios()
+        inicializar_banco()
+        
+        # Migrar dados existentes se necessário
+        if os.path.exists('usuarios.json'):
+            conn = sqlite3.connect('database/usuarios.db')
+            cursor = conn.cursor()
+            cursor.execute('SELECT COUNT(*) FROM usuarios')
+            total_usuarios = cursor.fetchone()[0]
+            conn.close()
+            
+            # Só migra se não houver usuários no banco
+            if total_usuarios == 0:
+                migrar_usuarios_json_para_sqlite()
+        
+        # Executar backup automático diário
+        timestamp = datetime.now().strftime('%Y%m%d')
+        backup_path = f'backups/backup_{timestamp}.zip'
+        
+        # Verifica se já existe backup do dia
+        if not os.path.exists(backup_path):
+            backup_automatico()
+            
+        # Limpar backups antigos
+        limpar_backups_antigos('backups')
+        
+        return True
+    except Exception as e:
+        st.error(f"Erro na inicialização do sistema: {str(e)}")
+        return False
+
+def migrar_usuarios_json_para_sqlite():
+    try:
+        with open('usuarios.json', 'r', encoding='utf-8') as f:
+            usuarios_json = json.load(f)
+            
+        conn = sqlite3.connect('database/usuarios.db')
+        cursor = conn.cursor()
+        
+        for nome, dados in usuarios_json.items():
+            cursor.execute('''
+                INSERT OR REPLACE INTO usuarios 
+                (nome, email, senha, perfil, ativo, primeiro_acesso, data_criacao)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                nome,
+                dados['email'],
+                dados['senha'],
+                dados['perfil'],
+                dados['ativo'],
+                dados.get('primeiro_acesso', True),
+                get_data_hora_brasil()
+            ))
+        
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Erro na migração: {str(e)}")
+        return False
 
 def inicializar_banco():
     try:
@@ -236,16 +332,26 @@ def verificar_diretorios():
 
 def importar_dados_antigos():
     try:
+        # Verificar maior número atual antes da importação
+        conn = sqlite3.connect('database/requisicoes.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT MAX(CAST(numero AS INTEGER)) FROM requisicoes')
+        ultimo_numero_atual = cursor.fetchone()[0] or 4999
+        
         # Carregar dados do JSON
         with open('requisicoes.json', 'r', encoding='utf-8') as file:
             requisicoes_antigas = json.load(file)
 
-        # Conectar ao banco
-        conn = sqlite3.connect('database/requisicoes.db')
-        cursor = conn.cursor()
+        # Backup preventivo
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        shutil.copy2('database/requisicoes.db', f'backups/pre_import_{timestamp}.db')
 
         # Inserir dados formatados
         for req in requisicoes_antigas:
+            numero_req = int(req.get('REQUISIÇÃO', 0))
+            if numero_req > ultimo_numero_atual:
+                ultimo_numero_atual = numero_req
+                
             items = [{
                 'item': 1,
                 'codigo': req.get('CÓDIGO', ''),
@@ -276,10 +382,17 @@ def importar_dados_antigos():
                 req.get('OBSERVAÇÕES DO COMPRADOR', '')
             ))
 
+        # Atualizar último número
+        with open('ultimo_numero.json', 'w') as f:
+            json.dump({'numero': ultimo_numero_atual}, f)
+            
         conn.commit()
         conn.close()
         return True
     except Exception as e:
+        # Restaurar backup em caso de erro
+        if os.path.exists(f'backups/pre_import_{timestamp}.db'):
+            shutil.copy2(f'backups/pre_import_{timestamp}.db', 'database/requisicoes.db')
         print(f"Erro na importação: {str(e)}")
         return False
 
@@ -320,10 +433,16 @@ def salvar_usuarios():
         if os.path.exists('usuarios.json'):
             shutil.copy2('usuarios.json', backup_file)
             
-        # Salvar os dados
+        # Salvar os dados garantindo que primeiro_acesso seja salvo corretamente
         with open('usuarios.json', 'w', encoding='utf-8') as f:
             usuarios_para_salvar = {
-                usuario: {**dados, 'senha': str(dados['senha'])} 
+                usuario: {
+                    'senha': str(dados['senha']),
+                    'perfil': dados['perfil'],
+                    'email': dados['email'],
+                    'ativo': dados['ativo'],
+                    'primeiro_acesso': dados.get('primeiro_acesso', True)
+                }
                 for usuario, dados in st.session_state.usuarios.items()
             }
             json.dump(usuarios_para_salvar, f, ensure_ascii=False, indent=4)
@@ -461,36 +580,66 @@ def backup_requisicoes():
         print(f"Erro no backup: {str(e)}")
         return False
 
-def backup_automatico(dados):
-    backup_dir = 'backup/'
-    if not os.path.exists(backup_dir):
-        os.makedirs(backup_dir)
-    
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    arquivos_backup = {
-        'usuarios': 'usuarios.json',
-        'perfis': 'perfis.json',
-        'requisicoes': 'requisicoes.json',
-        'ultimo_numero': 'ultimo_numero.json'
-    }
-    
-    backup_file = os.path.join(backup_dir, f'backup_{timestamp}.zip')
-    
+def backup_automatico(dados=None):
     try:
+        # Criar diretório de backup se não existir
+        backup_dir = 'backups/'  # Corrigido para 'backups' ao invés de 'backup'
+        os.makedirs(backup_dir, exist_ok=True)
+        
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # Definir arquivos para backup
+        arquivos_backup = {
+            'usuarios_db': 'database/usuarios.db',
+            'requisicoes_db': 'database/requisicoes.db',
+            'usuarios': 'usuarios.json',
+            'perfis': 'perfis.json',
+            'requisicoes': 'requisicoes.json',
+            'ultimo_numero': 'ultimo_numero.json'
+        }
+        
+        backup_file = os.path.join(backup_dir, f'backup_{timestamp}.zip')
+        
+        # Criar arquivo ZIP com todos os backups
         with zipfile.ZipFile(backup_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for nome, arquivo in arquivos_backup.items():
                 if os.path.exists(arquivo):
-                    zipf.write(arquivo)
+                    zipf.write(arquivo, os.path.basename(arquivo))
+        
+        # Limpar backups antigos
+        limpar_backups_antigos(backup_dir)
         
         return backup_file, os.path.getsize(backup_file)
     except Exception as e:
         st.error(f"Erro ao realizar backup: {str(e)}")
         return None, 0
 
+def limpar_backups_antigos(backup_dir, dias_manter=7):
+    try:
+        data_limite = datetime.now() - timedelta(days=dias_manter)
+        
+        for arquivo in os.listdir(backup_dir):
+            if arquivo.startswith('backup_') and arquivo.endswith('.zip'):
+                caminho_arquivo = os.path.join(backup_dir, arquivo)
+                data_arquivo = datetime.fromtimestamp(os.path.getctime(caminho_arquivo))
+                
+                if data_arquivo < data_limite:
+                    os.remove(caminho_arquivo)
+    except Exception as e:
+        print(f"Erro ao limpar backups antigos: {str(e)}")
+
 def restaurar_backup():
     try:
         conn = sqlite3.connect('database/requisicoes.db')
         cursor = conn.cursor()
+        
+        # Verificar maior número antes da restauração
+        cursor.execute('SELECT MAX(CAST(numero AS INTEGER)) FROM requisicoes')
+        ultimo_numero_atual = cursor.fetchone()[0] or 4999
+        
+        # Fazer backup preventivo antes de limpar
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        shutil.copy2('database/requisicoes.db', f'backups/pre_restore_{timestamp}.db')
         
         # Limpa tabela atual
         cursor.execute('DELETE FROM requisicoes')
@@ -503,6 +652,10 @@ def restaurar_backup():
             # Garante que items seja string JSON
             if isinstance(req['items'], list):
                 req['items'] = json.dumps(req['items'])
+            
+            # Verifica se o número é maior que o último número atual
+            if int(req['numero']) > ultimo_numero_atual:
+                ultimo_numero_atual = int(req['numero'])
                 
             cursor.execute('''
                 INSERT INTO requisicoes 
@@ -523,15 +676,24 @@ def restaurar_backup():
                 req.get('justificativa_recusa', ''),
                 req.get('observacao_geral', '')
             ))
+        
+        # Atualiza o arquivo de controle do último número
+        with open('ultimo_numero.json', 'w') as f:
+            json.dump({'numero': ultimo_numero_atual}, f)
             
         conn.commit()
         conn.close()
         
         # Recarrega dados na sessão
         st.session_state.requisicoes = carregar_requisicoes()
+        st.success("Backup restaurado com sucesso!")
         return True
+        
     except Exception as e:
         st.error(f"Erro ao restaurar backup: {str(e)}")
+        # Restaura backup preventivo em caso de erro
+        if os.path.exists(f'backups/pre_restore_{timestamp}.db'):
+            shutil.copy2(f'backups/pre_restore_{timestamp}.db', 'database/requisicoes.db')
         return False
 
 def salvar_requisicao(requisicao):
@@ -696,7 +858,7 @@ def tela_login():
         if usuario in st.session_state.usuarios:
             user_data = st.session_state.usuarios[usuario]
             
-            if user_data.get('senha') is None:
+            if user_data.get('senha') is None or user_data.get('primeiro_acesso', True):
                 st.markdown("### 😊 Primeiro Acesso - Configure sua senha")
                 with st.form("primeiro_acesso_form"):
                     nova_senha = st.text_input("Nova Senha", type="password", 
@@ -712,12 +874,13 @@ def tela_login():
                             st.error("As senhas não coincidem")
                             return
                             
-                        st.session_state.usuarios[usuario]['senha'] = nova_senha
+                        st.session_state.usuarios[usuario]['senha'] = gerar_hash_senha(nova_senha)
                         st.session_state.usuarios[usuario]['primeiro_acesso'] = False
-                        salvar_usuarios()
-                        st.success("Senha cadastrada com sucesso!")
-                        time.sleep(1)
-                        st.rerun()
+                        if salvar_usuarios():
+                            st.success("Senha cadastrada com sucesso!")
+                            time.sleep(1)
+                            st.rerun()
+
             else:
                 senha = st.text_input("Senha", type="password", key="senha_input")
                 col1, col2 = st.columns([1, 1])
@@ -728,7 +891,7 @@ def tela_login():
                             st.error("USUÁRIO INATIVO - CONTATE O ADMINISTRADOR")
                             return
                             
-                        if user_data['senha'] != senha:
+                        if user_data['senha'] != gerar_hash_senha(senha):
                             st.error("Senha incorreta")
                             return
                             
@@ -1700,11 +1863,6 @@ def requisicoes():
                                     
                                     if salvar_requisicao(req):
                                         try:
-                                            enviar_notificacao(
-                                                f"Requisição {req['numero']} Recusada",
-                                                f"{st.session_state['usuario']} recusou a requisição Nº{req['numero']} para o cliente {req['cliente']}. Justificativa: {justificativa}",
-                                                req['numero']
-                                            )
                                             enviar_email_requisicao(req, "recusada")
                                             st.success("Requisição recusada com sucesso!")
                                             st.rerun()
