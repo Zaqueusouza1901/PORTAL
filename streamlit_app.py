@@ -923,6 +923,7 @@ def tela_login():
                             
                         st.session_state.usuarios[usuario]['senha'] = gerar_hash_senha(nova_senha)
                         st.session_state.usuarios[usuario]['primeiro_acesso'] = False
+                        st.session_state.usuarios[usuario]['data_ultimo_acesso'] = get_data_hora_brasil()
                         if salvar_usuarios():
                             st.success("Senha cadastrada com sucesso!")
                             time.sleep(1)
@@ -937,16 +938,32 @@ def tela_login():
                         if not user_data.get('ativo', True):
                             st.error("USUÁRIO INATIVO - CONTATE O ADMINISTRADOR")
                             return
-                            
-                        if user_data['senha'] != gerar_hash_senha(senha):
-                            st.error("Senha incorreta")
-                            return
+                        
+                        senha_digitada_hash = gerar_hash_senha(senha)
+                        senha_armazenada = user_data['senha']
+                        
+                        # Se a senha armazenada não for hash, compara diretamente
+                        if len(senha_armazenada) != 64:  # Tamanho do hash SHA-256
+                            if senha != senha_armazenada:
+                                st.error("Senha incorreta")
+                                return
+                            # Atualiza para o formato hash
+                            st.session_state.usuarios[usuario]['senha'] = senha_digitada_hash
+                            salvar_usuarios()
+                        else:
+                            # Compara os hashes
+                            if senha_digitada_hash != senha_armazenada:
+                                st.error("Senha incorreta")
+                                return
                             
                         st.session_state['usuario'] = usuario
                         st.session_state['perfil'] = user_data['perfil']
+                        st.session_state.usuarios[usuario]['data_ultimo_acesso'] = get_data_hora_brasil()
+                        salvar_usuarios()
                         st.success(f"Bem-vindo, {usuario}!")
                         time.sleep(1)
                         st.rerun()
+
 
 def menu_lateral():
     with st.sidebar:
