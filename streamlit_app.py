@@ -2097,19 +2097,24 @@ def requisicoes():
                                 # Campos de resposta em linha única
                                 col1, col2, col3 = st.columns(3)
                                 with col1:
-                                    item['custo_unit'] = st.number_input(
+                                    custo_str = st.text_input(
                                         "R$ UNIT",
-                                        value=item.get('custo_unit', 0.0),
-                                        min_value=0.0,
-                                        format="%.2f",
+                                        value=f"{item.get('custo_unit', 0.0):,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'),
                                         key=f"custo_{req['numero']}_{item_idx}"
                                     )
+                                    # Converte o valor digitado para float
+                                    try:
+                                        custo_str = custo_str.replace('.', '').replace(',', '.')
+                                        item['custo_unit'] = float(custo_str)
+                                    except ValueError:
+                                        item['custo_unit'] = 0.0
+                                        
                                 with col2:
                                     item['markup'] = st.number_input(
                                         "% MARKUP",
                                         value=item.get('markup', 0.0),
                                         min_value=0.0,
-                                        format="%.2f",
+                                        format="%.0f",
                                         step=1.0,
                                         key=f"markup_{req['numero']}_{item_idx}"
                                     )
@@ -2119,6 +2124,13 @@ def requisicoes():
                                         value=item.get('prazo_entrega', ''),
                                         key=f"prazo_{req['numero']}_{item_idx}"
                                     )
+
+                                # Cálculo automático quando custo e markup são preenchidos
+                                if item['custo_unit'] > 0 and item['markup'] > 0:
+                                    item['venda_unit'] = item['custo_unit'] * (1 + (item['markup'] / 100))
+                                    item['venda_total'] = item['venda_unit'] * item['quantidade']
+                                    item['salvo'] = True
+                                    salvar_requisicao(req)
 
                                 # Checkbox e campo para observações
                                 mostrar_obs = st.checkbox(
@@ -2138,10 +2150,6 @@ def requisicoes():
                                 col_btn1, col_btn2 = st.columns(2)
                                 with col_btn1:
                                     if st.button("💾 SALVAR ITEM", key=f"salvar_{req['numero']}_{item_idx}", type="primary"):
-                                        # Calcular valor de venda
-                                        item['venda_unit'] = item['custo_unit'] * (1 + (item['markup'] / 100))
-                                        item['venda_total'] = item['venda_unit'] * item['quantidade']
-                                        item['salvo'] = True
                                         if mostrar_obs:
                                             req['observacao_geral'] = observacao_geral
                                         salvar_requisicao(req)
