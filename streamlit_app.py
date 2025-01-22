@@ -18,7 +18,7 @@ from streamlit_autorefresh import st_autorefresh
 
 def inicializar_banco():
     try:
-        conn = sqlite3.connect('database/requisicoes.db')  # Caminho correto
+        conn = sqlite3.connect('database/requisicoes.db')
         cursor = conn.cursor()
         cursor.execute('''CREATE TABLE IF NOT EXISTS requisicoes
             (numero TEXT PRIMARY KEY, 
@@ -31,11 +31,33 @@ def inicializar_banco():
             comprador_responsavel TEXT,
             data_hora_resposta TEXT,
             justificativa_recusa TEXT,
-            observacao_geral TEXT)''')
+            observacao_geral TEXT,
+            anexos TEXT)''')  # Adicionando o campo anexos
         conn.commit()
         conn.close()
     except Exception as e:
         st.error(f"Erro ao inicializar banco: {str(e)}")
+
+def atualizar_banco():
+    conn = sqlite3.connect('database/requisicoes.db')
+    cursor = conn.cursor()
+    
+    # Verifica se a coluna anexos já existe
+    cursor.execute("PRAGMA table_info(requisicoes)")
+    colunas = cursor.fetchall()
+    coluna_existe = any(coluna[1] == 'anexos' for coluna in colunas)
+    
+    if not coluna_existe:
+        try:
+            cursor.execute('ALTER TABLE requisicoes ADD COLUMN anexos TEXT')
+            conn.commit()
+            print("Coluna 'anexos' adicionada com sucesso")
+        except sqlite3.OperationalError:
+            print("Erro ao adicionar coluna 'anexos'")
+    else:
+        print("Coluna 'anexos' já existe")
+    
+    conn.close()
 
 def mostrar_espaco_armazenamento():
     import plotly.graph_objects as go
@@ -191,6 +213,11 @@ def enviar_email_requisicao(requisicao, tipo_notificacao):
         return False
 
 # Configuração da página
+
+if __name__ == "__main__":
+    inicializar_banco()
+    atualizar_banco()
+
 st.set_page_config(
     page_title="PORTAL - JETFRIO",
     layout="wide",
@@ -428,8 +455,10 @@ def carregar_requisicoes():
         for row in cursor.fetchall():
             try:
                 items = json.loads(row[5]) if row[5] else []
+                anexos = json.loads(row[11]) if row[11] else []  # Carregando anexos
             except:
                 items = []
+                anexos = []
                 
             requisicao = {
                 'numero': row[0],
@@ -442,7 +471,8 @@ def carregar_requisicoes():
                 'comprador_responsavel': row[7],
                 'data_hora_resposta': row[8],
                 'justificativa_recusa': row[9],
-                'observacao_geral': row[10]
+                'observacao_geral': row[10],
+                'anexos': anexos
             }
             requisicoes.append(requisicao)
         conn.close()
@@ -572,8 +602,8 @@ def salvar_requisicao(requisicao):
     cursor.execute('''
     INSERT OR REPLACE INTO requisicoes 
     (numero, cliente, vendedor, data_hora, status, items, observacoes_vendedor, 
-    comprador_responsavel, data_hora_resposta, justificativa_recusa, observacao_geral)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    comprador_responsavel, data_hora_resposta, justificativa_recusa, observacao_geral, anexos)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         requisicao['numero'],
         requisicao['cliente'],
@@ -585,7 +615,8 @@ def salvar_requisicao(requisicao):
         requisicao.get('comprador_responsavel', ''),
         requisicao.get('data_hora_resposta', ''),
         requisicao.get('justificativa_recusa', ''),
-        requisicao.get('observacao_geral', '')
+        requisicao.get('observacao_geral', ''),
+        json.dumps(requisicao.get('anexos', []))
     ))
     conn.commit()
     conn.close()
@@ -598,6 +629,20 @@ def get_data_hora_brasil():
     except Exception as e:
         st.error(f"Erro ao obter data/hora: {str(e)}")
         return datetime.now().strftime('%H:%M:%S - %d/%m/%Y')
+
+def validar_arquivo(file):
+    # Tamanho máximo de 5MB
+    MAX_SIZE = 5 * 1024 * 1024
+    if file.size > MAX_SIZE:
+        return False, "Arquivo muito grande. Tamanho máximo: 5MB"
+    
+    # Validar tipos permitidos
+    tipos_permitidos = ['pdf', 'txt', 'jpg', 'jpeg', 'png', 'xls', 'xlsx']
+    extensao = file.name.split('.')[-1].lower()
+    if extensao not in tipos_permitidos:
+        return False, f"Tipo de arquivo não permitido. Tipos aceitos: {', '.join(tipos_permitidos)}"
+    
+    return True, ""
 
 def enviar_email(destinatario, assunto, mensagem):
     try:
@@ -1063,6 +1108,17 @@ def nova_requisicao():
     with col2:
         st.write(f"**VENDEDOR:** {st.session_state.get('usuario', '')}")
 
+    # Uploader de arquivos
+    uploaded_files = st.file_uploader("Anexar arquivos (opcional)", 
+                                    accept_multiple_files=True,
+                                    type=['pdf', 'txt', 'jpg', 'jpeg', 'png', 'xls', 'xlsx'])
+
+    # Exibir arquivos anexados
+    if uploaded_files:
+        st.write("Arquivos anexados:")
+        for file in uploaded_files:
+            st.write(f"- {file.name} ({file.type})")
+    
     col1, col2 = st.columns(2)
     with col2:
         if st.button("❌ CANCELAR", type="secondary", use_container_width=True):
@@ -1333,7 +1389,8 @@ def nova_requisicao():
                     'data_hora': get_data_hora_brasil(),
                     'status': 'ABERTA',
                     'items': st.session_state.items_temp.copy(),
-                    'observacoes_vendedor': observacoes_vendedor
+                    'observacoes_vendedor': observacoes_vendedor,
+                    'anexos': [{'nome': file.name, 'tipo': file.type, 'conteudo': file.getvalue()} for file in uploaded_files] if uploaded_files else []
                 }
                 
                 if salvar_requisicao(nova_req):
@@ -1773,6 +1830,34 @@ def requisicoes():
                                         <p style='margin: 0 0 5px 0; color: var(--text-color);'>{}</p>
                                     </div>
                                 """.format(req['observacoes_vendedor']), unsafe_allow_html=True)
+                                
+                            # Exibição dos anexos
+                            if req.get('anexos'):
+                                st.markdown("""
+                                    <div style='background-color: var(--background-color);
+                                              border-radius: 4px; 
+                                              padding: 10px; 
+                                              margin: 10px 0 0px 0; 
+                                              border-left: 4px solid #1B81C5;
+                                              border: 1px solid var(--secondary-background-color);'>
+                                        <p style='color: var(--text-color); 
+                                                  font-weight: bold; 
+                                                  margin-bottom: 10px;'>ANEXOS:</p>
+                                """, unsafe_allow_html=True)
+                                
+                                for anexo in req['anexos']:
+                                    col1, col2 = st.columns([4,1])
+                                    with col1:
+                                        st.write(f"📎 {anexo['nome']}")
+                                    with col2:
+                                        st.download_button(
+                                            label="⬇️ Baixar",
+                                            data=anexo['conteudo'],
+                                            file_name=anexo['nome'],
+                                            mime=anexo['tipo']
+                                        )
+                                
+                                st.markdown("</div>", unsafe_allow_html=True)
 
                             # Exibição da justificativa de recusa
                             if req['status'] == 'RECUSADA':
@@ -2321,5 +2406,4 @@ def main():
         elif menu == "Configurações":
             configuracoes()
 
-if __name__ == "__main__":
     main()
