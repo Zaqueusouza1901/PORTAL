@@ -331,6 +331,7 @@ def verificar_diretorios():
     return True
 
 def importar_dados_antigos():
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')  # Definir timestamp no início da função
     try:
         # Verificar maior número atual antes da importação
         conn = sqlite3.connect('database/requisicoes.db')
@@ -343,7 +344,6 @@ def importar_dados_antigos():
             requisicoes_antigas = json.load(file)
 
         # Backup preventivo
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         shutil.copy2('database/requisicoes.db', f'backups/pre_import_{timestamp}.db')
 
         # Inserir dados formatados
