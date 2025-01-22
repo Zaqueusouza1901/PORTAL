@@ -1866,10 +1866,6 @@ def requisicoes():
                                             req['data_hora_resposta'] = get_data_hora_brasil()
                                             if salvar_requisicao(req):
                                                 enviar_email_requisicao(req, "finalizada")
-                                                    f"REQUISIÇÃO {req['numero']} FINALIZADA",
-                                                    f"{st.session_state['usuario']} finalizou a requisição Nº{req['numero']} para o cliente {req['cliente']}",
-                                                    req['numero']
-                                                )
                                                 st.success("REQUISIÇÃO FINALIZADA COM SUCESSO!")
                                                 st.rerun()
                                             else:
