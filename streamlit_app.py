@@ -615,7 +615,7 @@ if 'usuarios' not in st.session_state:
     if not os.path.exists('ultimo_numero.json'):
         inicializar_numero_requisicao()
     if 'requisicoes' not in st.session_state:
-        importar_dados_antigos()  # Adicionar esta linha
+        importar_dados_antigos()
         st.session_state.requisicoes = carregar_requisicoes()
 
 # Adicionar aqui a inicialização dos perfis
@@ -1867,6 +1867,41 @@ def requisicoes():
                                             else:
                                                 st.error("ERRO AO SALVAR A REQUISIÇÃO. TENTE NOVAMENTE.")
 
+def get_permissoes_perfil(perfil):
+    permissoes_padrao = {
+        'vendedor': {
+            'dashboard': True,
+            'requisicoes': True,
+            'cotacoes': True,
+            'importacao': False,
+            'configuracoes': False,
+            'editar_usuarios': False,
+            'excluir_usuarios': False,
+            'editar_perfis': False
+        },
+        'comprador': {
+            'dashboard': True,
+            'requisicoes': True,
+            'cotacoes': True,
+            'importacao': True,
+            'configuracoes': False,
+            'editar_usuarios': False,
+            'excluir_usuarios': False,
+            'editar_perfis': False
+        },
+        'administrador': {
+            'dashboard': True,
+            'requisicoes': True,
+            'cotacoes': True,
+            'importacao': True,
+            'configuracoes': True,
+            'editar_usuarios': True,
+            'excluir_usuarios': True,
+            'editar_perfis': True
+        }
+    }
+    return permissoes_padrao.get(perfil, permissoes_padrao['vendedor'])
+
 def configuracoes():
     st.title("Configurações")
     
@@ -1994,6 +2029,7 @@ def configuracoes():
                                 'email': novo_email,
                                 'perfil': novo_perfil,
                                 'ativo': novo_status,
+                                'permissoes': permissoes
                                 'permissoes': get_permissoes_perfil(novo_perfil)
                             })
                             salvar_usuarios()
