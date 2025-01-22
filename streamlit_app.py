@@ -293,41 +293,6 @@ def verificar_arquivos():
         st.error(f"Erro ao verificar arquivos: {str(e)}")
         return False
 
-def get_permissoes_perfil(perfil):
-    permissoes_padrao = {
-        'vendedor': {
-            'dashboard': True,
-            'requisicoes': True,
-            'cotacoes': True,
-            'importacao': False,
-            'configuracoes': False,
-            'editar_usuarios': False,
-            'excluir_usuarios': False,
-            'editar_perfis': False
-        },
-        'comprador': {
-            'dashboard': True,
-            'requisicoes': True,
-            'cotacoes': True,
-            'importacao': True,
-            'configuracoes': False,
-            'editar_usuarios': False,
-            'excluir_usuarios': False,
-            'editar_perfis': False
-        },
-        'administrador': {
-            'dashboard': True,
-            'requisicoes': True,
-            'cotacoes': True,
-            'importacao': True,
-            'configuracoes': True,
-            'editar_usuarios': True,
-            'excluir_usuarios': True,
-            'editar_perfis': True
-        }
-    }
-    return permissoes_padrao.get(perfil, permissoes_padrao['vendedor'])
-
 def carregar_usuarios():
     try:
         with open('usuarios.json', 'r', encoding='utf-8') as f:
@@ -1063,17 +1028,6 @@ def nova_requisicao():
     with col2:
         st.write(f"**VENDEDOR:** {st.session_state.get('usuario', '')}")
 
-    # Uploader de arquivos
-    uploaded_files = st.file_uploader("Anexar arquivos (opcional)", 
-                                    accept_multiple_files=True,
-                                    type=['pdf', 'txt', 'jpg', 'jpeg', 'png', 'xls', 'xlsx'])
-
-    # Exibir arquivos anexados
-    if uploaded_files:
-        st.write("Arquivos anexados:")
-        for file in uploaded_files:
-            st.write(f"- {file.name} ({file.type})")
-    
     col1, col2 = st.columns(2)
     with col2:
         if st.button("❌ CANCELAR", type="secondary", use_container_width=True):
@@ -1322,24 +1276,13 @@ def nova_requisicao():
         # Campo de observações só aparece se o checkbox estiver marcado
         if mostrar_obs:
             st.markdown("### OBSERVAÇÕES")
-            col1, col2 = st.columns([3,1])
-            
-            with col1:
-                observacoes_vendedor = st.text_area(
-                    "Insira suas observações aqui",
-                    key="observacoes_vendedor",
-                    height=100
-                )
-            
-            with col2:
-                if st.button("💾 Salvar Observação", type="primary", use_container_width=True):
-                    if observacoes_vendedor:
-                        st.session_state['observacoes_temp'] = observacoes_vendedor
-                        st.success("Observação salva!")
-                        time.sleep(1)
-                        st.rerun()
+            observacoes_vendedor = st.text_area(
+                "Insira suas observações aqui",
+                key="observacoes_vendedor",
+                height=100
+            )
         else:
-            observacoes_vendedor = st.session_state.get('observacoes_temp', "")  # Recupera observação salva
+            observacoes_vendedor = ""  # Valor padrão quando não há observações
 
         col1, col2 = st.columns(2)
         with col1:
@@ -1355,21 +1298,11 @@ def nova_requisicao():
                     'data_hora': get_data_hora_brasil(),
                     'status': 'ABERTA',
                     'items': st.session_state.items_temp.copy(),
-                    'observacoes_vendedor': observacoes_vendedor,
-                    'anexos': [{'nome': file.name, 'tipo': file.type, 'conteudo': file.getvalue()} for file in uploaded_files] if uploaded_files else []
+                    'observacoes_vendedor': observacoes_vendedor
                 }
                 
                 if salvar_requisicao(nova_req):
-                    # Limpar todos os dados temporários
-                    st.session_state.items_temp = []
-                    st.session_state['modo_requisicao'] = None
-                    if 'cliente' in st.session_state:
-                        del st.session_state['cliente']
-                    if 'observacoes_vendedor' in st.session_state:
-                        del st.session_state['observacoes_vendedor']
                     st.session_state.requisicoes = carregar_requisicoes()
-                    st.success("Requisição enviada com sucesso!")
-                    time.sleep(1)
                     st.rerun()
 
 def salvar_configuracoes():
@@ -1805,34 +1738,6 @@ def requisicoes():
                                         <p style='margin: 0 0 5px 0; color: var(--text-color);'>{}</p>
                                     </div>
                                 """.format(req['observacoes_vendedor']), unsafe_allow_html=True)
-                                
-                            # Exibição dos anexos
-                            if req.get('anexos'):
-                                st.markdown("""
-                                    <div style='background-color: var(--background-color);
-                                              border-radius: 4px; 
-                                              padding: 10px; 
-                                              margin: 10px 0 0px 0; 
-                                              border-left: 4px solid #1B81C5;
-                                              border: 1px solid var(--secondary-background-color);'>
-                                        <p style='color: var(--text-color); 
-                                                  font-weight: bold; 
-                                                  margin-bottom: 10px;'>ANEXOS:</p>
-                                """, unsafe_allow_html=True)
-                                
-                                for anexo in req['anexos']:
-                                    col1, col2 = st.columns([4,1])
-                                    with col1:
-                                        st.write(f"📎 {anexo['nome']}")
-                                    with col2:
-                                        st.download_button(
-                                            label="⬇️ Baixar",
-                                            data=anexo['conteudo'],
-                                            file_name=anexo['nome'],
-                                            mime=anexo['tipo']
-                                        )
-                                
-                                st.markdown("</div>", unsafe_allow_html=True)
 
                             # Exibição da justificativa de recusa
                             if req['status'] == 'RECUSADA':
@@ -1961,6 +1866,7 @@ def requisicoes():
                                                 st.rerun()
                                             else:
                                                 st.error("ERRO AO SALVAR A REQUISIÇÃO. TENTE NOVAMENTE.")
+
 def configuracoes():
     st.title("Configurações")
     
