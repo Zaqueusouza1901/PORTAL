@@ -1320,15 +1320,27 @@ def nova_requisicao():
         mostrar_obs = st.checkbox("INCLUIR OBSERVAÇÕES")
         
         # Campo de observações só aparece se o checkbox estiver marcado
+        # Campo de observações só aparece se o checkbox estiver marcado
         if mostrar_obs:
             st.markdown("### OBSERVAÇÕES")
-            observacoes_vendedor = st.text_area(
-                "Insira suas observações aqui",
-                key="observacoes_vendedor",
-                height=100
-            )
+            col1, col2 = st.columns([3,1])
+            
+            with col1:
+                observacoes_vendedor = st.text_area(
+                    "Insira suas observações aqui",
+                    key="observacoes_vendedor",
+                    height=100
+                )
+            
+            with col2:
+                if st.button("💾 Salvar Observação", type="primary", use_container_width=True):
+                    if observacoes_vendedor:
+                        st.session_state['observacoes_temp'] = observacoes_vendedor
+                        st.success("Observação salva!")
+                        time.sleep(1)
+                        st.rerun()
         else:
-            observacoes_vendedor = ""  # Valor padrão quando não há observações
+            observacoes_vendedor = st.session_state.get('observacoes_temp', "")  # Recupera observação salva
 
         col1, col2 = st.columns(2)
         with col1:
