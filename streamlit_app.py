@@ -628,6 +628,53 @@ def limpar_backups_antigos(backup_dir, dias_manter=7):
     except Exception as e:
         print(f"Erro ao limpar backups antigos: {str(e)}")
 
+def listar_backups(backup_dir='backups/'):
+    if not os.path.exists(backup_dir):
+        os.makedirs(backup_dir)
+        
+    st.title("Backups Disponíveis")
+    
+    # Lista e ordena backups
+    backups = []
+    for arquivo in os.listdir(backup_dir):
+        if arquivo.startswith('backup_') and (arquivo.endswith('.zip') or arquivo.endswith('.json')):
+            caminho_arquivo = os.path.join(backup_dir, arquivo)
+            tamanho = os.path.getsize(caminho_arquivo) / 1024  # Tamanho em KB
+            data_criacao = datetime.fromtimestamp(os.path.getctime(caminho_arquivo))
+            tipo = 'AUTOMÁTICO' if 'auto' in arquivo else 'MANUAL'
+            
+            backups.append({
+                'nome': arquivo,
+                'data_hora': data_criacao.strftime('%d/%m/%Y %H:%M:%S'),
+                'tamanho': f"{tamanho:.2f} KB",
+                'tipo': tipo,
+                'caminho': caminho_arquivo
+            })
+    
+    # Ordena por data mais recente
+    backups.sort(key=lambda x: x['data_hora'], reverse=True)
+    
+    # Mostra último backup realizado
+    if backups:
+        ultimo_backup = backups[0]
+        st.info(f"Último backup: {ultimo_backup['data_hora']} - {ultimo_backup['tipo']}")
+    
+    # Lista backups em formato de tabela
+    for backup in backups:
+        col1, col2, col3 = st.columns([3, 1, 1])
+        with col1:
+            st.text(f"{backup['nome']} ({backup['tamanho']})")
+        with col2:
+            st.text(f"{backup['tipo']} - {backup['data_hora']}")
+        with col3:
+            if st.button("🗑️", key=f"delete_{backup['nome']}"):
+                try:
+                    os.remove(backup['caminho'])
+                    st.success("Backup removido com sucesso!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao remover backup: {str(e)}")
+
 def restaurar_backup():
     try:
         conn = sqlite3.connect('database/requisicoes.db')
