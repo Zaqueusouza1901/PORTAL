@@ -4,6 +4,7 @@ import hashlib
 import pandas as pd
 import time
 import zipfile
+import logging
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 import pytz
