@@ -2588,7 +2588,7 @@ def main():
     inicializar_banco()
     
     # Adiciona atualização automática a cada 120 segundos
-    st_autorefresh(interval=1200000, key="datarefresh")
+    st_autorefresh(interval=3600000, key="backup_refresh")
     
     if 'usuario' not in st.session_state:
         tela_login()
