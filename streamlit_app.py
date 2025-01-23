@@ -4,12 +4,12 @@ import hashlib
 import pandas as pd
 import time
 import zipfile
-import logging
 import matplotlib.pyplot as plt
+import gzip
+import logging
 from datetime import datetime, timedelta
 import pytz
 import json
-import gzip
 import os
 import smtplib
 from email.mime.text import MIMEText
@@ -582,10 +582,14 @@ def backup_requisicoes():
         print(f"Erro no backup: {str(e)}")
         return False
 
+import gzip
+import logging
+from datetime import datetime
+
 def backup_automatico(dados=None):
     try:
         # Criar diretório de backup se não existir
-        backup_dir = 'backups/'  # Corrigido para 'backups' ao invés de 'backup'
+        backup_dir = 'backups/'
         os.makedirs(backup_dir, exist_ok=True)
         
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -608,13 +612,26 @@ def backup_automatico(dados=None):
                 if os.path.exists(arquivo):
                     zipf.write(arquivo, os.path.basename(arquivo))
         
+        # Comprimir o backup
+        comprimir_backup(backup_file)
+        
+        # Registrar o log do backup
+        logging.basicConfig(filename='backup_log.txt', level=logging.INFO)
+        logging.info(f"Backup realizado em {datetime.now()}: {backup_file}.gz")
+        
         # Limpar backups antigos
         limpar_backups_antigos(backup_dir)
         
-        return backup_file, os.path.getsize(backup_file)
+        return f"{backup_file}.gz", os.path.getsize(f"{backup_file}.gz")
     except Exception as e:
         st.error(f"Erro ao realizar backup: {str(e)}")
         return None, 0
+
+def comprimir_backup(backup_path):
+    with open(backup_path, 'rb') as f_in:
+        with gzip.open(f'{backup_path}.gz', 'wb') as f_out:
+            f_out.writelines(f_in)
+    os.remove(backup_path)  # Remove o arquivo ZIP original após a compressão
 
 def limpar_backups_antigos(backup_dir, dias_manter=7):
     try:
