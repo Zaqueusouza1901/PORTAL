@@ -582,9 +582,19 @@ def backup_requisicoes():
         print(f"Erro no backup: {str(e)}")
         return False
 
-import gzip
-import logging
-from datetime import datetime
+def verificar_integridade_db():
+    conn = sqlite3.connect('database/requisicoes.db')
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA integrity_check")
+    resultado = cursor.fetchone()
+    conn.close()
+    return resultado[0] == 'ok'
+
+def verificar_conteudo_backup(arquivo_backup):
+    with zipfile.ZipFile(arquivo_backup, 'r') as zip_ref:
+        arquivos_esperados = ['usuarios.db', 'requisicoes.db', 'usuarios.json', 'perfis.json', 'requisicoes.json', 'ultimo_numero.json']
+        arquivos_presentes = zip_ref.namelist()
+        return all(arquivo in arquivos_presentes for arquivo in arquivos_esperados)
 
 def backup_automatico(dados=None):
     try:
@@ -615,16 +625,19 @@ def backup_automatico(dados=None):
         # Comprimir o backup
         comprimir_backup(backup_file)
         
-        # Registrar o log do backup
-        logging.basicConfig(filename='backup_log.txt', level=logging.INFO)
-        logging.info(f"Backup realizado em {datetime.now()}: {backup_file}.gz")
+        # Verificar integridade e conteúdo do backup
+        if verificar_integridade_db() and verificar_conteudo_backup(f"{backup_file}.gz"):
+            logging.info(f"Backup realizado com sucesso e integridade verificada: {backup_file}.gz")
+        else:
+            logging.error("Problemas detectados no backup. Verificação necessária.")
+            return None, 0
         
         # Limpar backups antigos
         limpar_backups_antigos(backup_dir)
         
         return f"{backup_file}.gz", os.path.getsize(f"{backup_file}.gz")
     except Exception as e:
-        st.error(f"Erro ao realizar backup: {str(e)}")
+        logging.error(f"Erro ao realizar backup: {str(e)}")
         return None, 0
 
 def comprimir_backup(backup_path):
