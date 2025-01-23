@@ -666,65 +666,16 @@ def listar_backups(backup_dir='backups/'):
         
     st.title("Gerenciamento de Backups")
     
-    # Estilização da tabela de backups
-    st.markdown("""
-        <style>
-        .backup-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 1rem 0;
-            background-color: var(--background-color);
-            border-radius: 8px;
-            overflow: hidden;
-        }
-        .backup-table th {
-            background-color: #2D2C74;
-            color: white;
-            padding: 12px;
-            text-align: left;
-            font-weight: 500;
-        }
-        .backup-table td {
-            padding: 12px;
-            border-bottom: 1px solid var(--secondary-background-color);
-            color: var(--text-color);
-        }
-        .backup-type {
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: 500;
-        }
-        .backup-auto {
-            background-color: #e3f2fd;
-            color: #1976d2;
-        }
-        .backup-manual {
-            background-color: #fff3e0;
-            color: #f57c00;
-        }
-        .backup-size {
-            font-family: monospace;
-        }
-        .backup-actions button {
-            padding: 4px 8px;
-            border-radius: 4px;
-            border: none;
-            background-color: #2D2C74;
-            color: white;
-            cursor: pointer;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-    
-    # Lista e ordena backups
+    # Lista e organiza backups
     backups = []
     for arquivo in os.listdir(backup_dir):
         if arquivo.startswith('backup_') and (arquivo.endswith('.zip') or arquivo.endswith('.gz')):
             caminho_arquivo = os.path.join(backup_dir, arquivo)
             tamanho = os.path.getsize(caminho_arquivo)
             data_criacao = datetime.fromtimestamp(os.path.getctime(caminho_arquivo))
-            tipo = 'AUTOMÁTICO' if 'auto' in arquivo else 'MANUAL'
+            
+            # Identifica se é backup automático ou manual
+            tipo = 'AUTOMÁTICO' if 'auto' in arquivo.lower() else 'MANUAL'
             
             # Formata o tamanho do arquivo
             if tamanho < 1024:
@@ -735,54 +686,63 @@ def listar_backups(backup_dir='backups/'):
                 tamanho_fmt = f"{tamanho/1024**2:.1f} MB"
             
             backups.append({
-                'nome': arquivo,
-                'data': data_criacao.strftime('%d/%m/%Y'),
-                'hora': data_criacao.strftime('%H:%M:%S'),
-                'tipo': tipo,
-                'tamanho': tamanho_fmt,
-                'caminho': caminho_arquivo
+                'Data': data_criacao.strftime('%d/%m/%Y'),
+                'Hora': data_criacao.strftime('%H:%M:%S'),
+                'Tipo': tipo,
+                'Tamanho': tamanho_fmt,
+                'Arquivo': arquivo,
+                'Caminho': caminho_arquivo
             })
     
-    # Ordena por data mais recente
-    backups.sort(key=lambda x: datetime.strptime(f"{x['data']} {x['hora']}", '%d/%m/%Y %H:%M:%S'), reverse=True)
-    
-    # Criar DataFrame para exibição
     if backups:
+        # Cria DataFrame e ordena por data/hora mais recente
         df = pd.DataFrame(backups)
+        df = df.sort_values(by=['Data', 'Hora'], ascending=[False, False])
+        
+        # Configura a exibição do DataFrame
         st.dataframe(
             df,
             column_config={
-                "nome": "Nome do Arquivo",
-                "data": st.column_config.TextColumn("Data", width=100),
-                "hora": st.column_config.TextColumn("Hora", width=100),
-                "tipo": st.column_config.TextColumn(
-                    "Tipo",
-                    width=100,
-                    help="Tipo de backup realizado"
+                "Data": st.column_config.TextColumn(
+                    "Data",
+                    width="small",
+                    help="Data de criação do backup"
                 ),
-                "tamanho": st.column_config.TextColumn("Tamanho", width=100),
-                "caminho": None  # Oculta a coluna do caminho
+                "Hora": st.column_config.TextColumn(
+                    "Hora",
+                    width="small"
+                ),
+                "Tipo": st.column_config.TextColumn(
+                    "Tipo",
+                    width="medium"
+                ),
+                "Tamanho": st.column_config.TextColumn(
+                    "Tamanho",
+                    width="small"
+                ),
+                "Arquivo": "Nome do Arquivo",
+                "Caminho": None  # Oculta a coluna do caminho
             },
             hide_index=True,
             use_container_width=True
         )
         
         # Adiciona botões de ação para cada backup
-        for backup in backups:
-            col1, col2, col3 = st.columns([3, 1, 1])
-            with col2:
-                with open(backup['caminho'], 'rb') as file:
+        for idx, backup in df.iterrows():
+            col1, col2 = st.columns([1, 4])
+            with col1:
+                with open(backup['Caminho'], 'rb') as file:
                     st.download_button(
-                        label="📥 Download",
-                        data=file,
-                        file_name=backup['nome'],
+                        "📥 Download",
+                        file,
+                        file_name=backup['Arquivo'],
                         mime="application/octet-stream",
-                        key=f"download_{backup['nome']}"
+                        key=f"download_{idx}"
                     )
-            with col3:
-                if st.button("🗑️ Excluir", key=f"delete_{backup['nome']}"):
+            with col2:
+                if st.button("🗑️ Excluir", key=f"delete_{idx}"):
                     try:
-                        os.remove(backup['caminho'])
+                        os.remove(backup['Caminho'])
                         st.success("Backup removido com sucesso!")
                         st.rerun()
                     except Exception as e:
