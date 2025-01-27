@@ -666,6 +666,54 @@ def listar_backups(backup_dir='backups/'):
         
     st.title("Gerenciamento de Backups")
     
+    # Estilização personalizada
+    st.markdown("""
+        <style>
+        .backup-card {
+            background-color: var(--background-color);
+            border: 1px solid var(--secondary-background-color);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+            transition: all 0.3s ease;
+        }
+        .backup-card:hover {
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .backup-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .backup-type {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .backup-auto {
+            background-color: #e3f2fd;
+            color: #1976d2;
+        }
+        .backup-manual {
+            background-color: #fff3e0;
+            color: #f57c00;
+        }
+        .backup-info {
+            display: flex;
+            gap: 20px;
+            color: var(--text-color);
+            font-size: 14px;
+        }
+        .backup-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    
     # Lista e organiza backups
     backups = []
     for arquivo in os.listdir(backup_dir):
@@ -673,8 +721,6 @@ def listar_backups(backup_dir='backups/'):
             caminho_arquivo = os.path.join(backup_dir, arquivo)
             tamanho = os.path.getsize(caminho_arquivo)
             data_criacao = datetime.fromtimestamp(os.path.getctime(caminho_arquivo))
-            
-            # Identifica se é backup automático ou manual
             tipo = 'AUTOMÁTICO' if 'auto' in arquivo.lower() else 'MANUAL'
             
             # Formata o tamanho do arquivo
@@ -686,69 +732,56 @@ def listar_backups(backup_dir='backups/'):
                 tamanho_fmt = f"{tamanho/1024**2:.1f} MB"
             
             backups.append({
-                'Data': data_criacao.strftime('%d/%m/%Y'),
-                'Hora': data_criacao.strftime('%H:%M:%S'),
-                'Tipo': tipo,
-                'Tamanho': tamanho_fmt,
-                'Arquivo': arquivo,
-                'Caminho': caminho_arquivo
+                'data': data_criacao,
+                'data_fmt': data_criacao.strftime('%d/%m/%Y'),
+                'hora': data_criacao.strftime('%H:%M:%S'),
+                'tipo': tipo,
+                'tamanho': tamanho_fmt,
+                'arquivo': arquivo,
+                'caminho': caminho_arquivo
             })
     
-    if backups:
-        # Cria DataFrame e ordena por data/hora mais recente
-        df = pd.DataFrame(backups)
-        df = df.sort_values(by=['Data', 'Hora'], ascending=[False, False])
+    # Ordena por data mais recente e limita a 20 registros
+    backups.sort(key=lambda x: x['data'], reverse=True)
+    backups = backups[:20]
+    
+    # Exibe os backups em cards
+    for backup in backups:
+        st.markdown(f"""
+            <div class="backup-card">
+                <div class="backup-header">
+                    <div>
+                        <span class="backup-type {'backup-auto' if backup['tipo'] == 'AUTOMÁTICO' else 'backup-manual'}">
+                            {backup['tipo']}
+                        </span>
+                    </div>
+                    <div class="backup-info">
+                        <span>📅 {backup['data_fmt']}</span>
+                        <span>⏰ {backup['hora']}</span>
+                        <span>📦 {backup['tamanho']}</span>
+                    </div>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
         
-        # Configura a exibição do DataFrame
-        st.dataframe(
-            df,
-            column_config={
-                "Data": st.column_config.TextColumn(
-                    "Data",
-                    width="small",
-                    help="Data de criação do backup"
-                ),
-                "Hora": st.column_config.TextColumn(
-                    "Hora",
-                    width="small"
-                ),
-                "Tipo": st.column_config.TextColumn(
-                    "Tipo",
-                    width="medium"
-                ),
-                "Tamanho": st.column_config.TextColumn(
-                    "Tamanho",
-                    width="small"
-                ),
-                "Arquivo": "Nome do Arquivo",
-                "Caminho": None  # Oculta a coluna do caminho
-            },
-            hide_index=True,
-            use_container_width=True
-        )
-        
-        # Adiciona botões de ação para cada backup
-        for idx, backup in df.iterrows():
-            col1, col2 = st.columns([1, 4])
-            with col1:
-                with open(backup['Caminho'], 'rb') as file:
-                    st.download_button(
-                        "📥 Download",
-                        file,
-                        file_name=backup['Arquivo'],
-                        mime="application/octet-stream",
-                        key=f"download_{idx}"
-                    )
-            with col2:
-                if st.button("🗑️ Excluir", key=f"delete_{idx}"):
-                    try:
-                        os.remove(backup['Caminho'])
-                        st.success("Backup removido com sucesso!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Erro ao remover backup: {str(e)}")
-    else:
-        st.info("Nenhum backup encontrado.")
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            with open(backup['caminho'], 'rb') as file:
+                st.download_button(
+                    "📥 Download",
+                    file,
+                    file_name=backup['arquivo'],
+                    mime="application/octet-stream",
+                    key=f"download_{backup['arquivo']}"
+                )
+        with col2:
+            if st.button("🗑️ Excluir", key=f"delete_{backup['arquivo']}"):
+                try:
+                    os.remove(backup['caminho'])
+                    st.success("Backup removido com sucesso!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao remover backup: {str(e)}")
 
 def restaurar_backup():
     try:
