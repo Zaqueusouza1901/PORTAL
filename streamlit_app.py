@@ -666,50 +666,44 @@ def listar_backups(backup_dir='backups/'):
         
     st.title("Gerenciamento de Backups")
     
-    # Estilização personalizada
+    # Tabela de backups com estilo personalizado
     st.markdown("""
         <style>
-        .backup-card {
-            background-color: var(--background-color);
-            border: 1px solid var(--secondary-background-color);
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 10px;
-            transition: all 0.3s ease;
-        }
-        .backup-card:hover {
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-        }
-        .backup-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-        .backup-type {
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: 500;
-        }
-        .backup-auto {
-            background-color: #e3f2fd;
-            color: #1976d2;
-        }
-        .backup-manual {
-            background-color: #fff3e0;
-            color: #f57c00;
-        }
-        .backup-info {
-            display: flex;
-            gap: 20px;
-            color: var(--text-color);
+        .backup-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
             font-size: 14px;
         }
-        .backup-actions {
-            display: flex;
-            gap: 10px;
-            margin-top: 10px;
+        .backup-table th {
+            background-color: #2D2C74;
+            color: white;
+            padding: 12px;
+            text-align: left;
+        }
+        .backup-table td {
+            padding: 12px;
+            border-bottom: 1px solid #ddd;
+        }
+        .backup-table tr:nth-child(even) {
+            background-color: rgba(45, 44, 116, 0.05);
+        }
+        .backup-table tr:hover {
+            background-color: rgba(45, 44, 116, 0.1);
+        }
+        .backup-type-auto {
+            background-color: #e3f2fd;
+            color: #1976d2;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+        .backup-type-manual {
+            background-color: #fff3e0;
+            color: #f57c00;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: 500;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -745,43 +739,46 @@ def listar_backups(backup_dir='backups/'):
     backups.sort(key=lambda x: x['data'], reverse=True)
     backups = backups[:20]
     
-    # Exibe os backups em cards
-    for backup in backups:
-        st.markdown(f"""
-            <div class="backup-card">
-                <div class="backup-header">
-                    <div>
-                        <span class="backup-type {'backup-auto' if backup['tipo'] == 'AUTOMÁTICO' else 'backup-manual'}">
-                            {backup['tipo']}
-                        </span>
-                    </div>
-                    <div class="backup-info">
-                        <span>📅 {backup['data_fmt']}</span>
-                        <span>⏰ {backup['hora']}</span>
-                        <span>📦 {backup['tamanho']}</span>
-                    </div>
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
+    # Cria DataFrame para exibição
+    if backups:
+        df = pd.DataFrame(backups)
+        st.dataframe(
+            df,
+            column_config={
+                "data_fmt": st.column_config.TextColumn("Data", width=100),
+                "hora": st.column_config.TextColumn("Hora", width=100),
+                "tipo": st.column_config.TextColumn("Tipo", width=100),
+                "tamanho": st.column_config.TextColumn("Tamanho", width=100),
+                "arquivo": "Nome do Arquivo",
+                "caminho": None,  # Oculta a coluna do caminho
+                "data": None  # Oculta a coluna de data original
+            },
+            hide_index=True,
+            use_container_width=True
+        )
         
-        col1, col2 = st.columns([1, 4])
-        with col1:
-            with open(backup['caminho'], 'rb') as file:
-                st.download_button(
-                    "📥 Download",
-                    file,
-                    file_name=backup['arquivo'],
-                    mime="application/octet-stream",
-                    key=f"download_{backup['arquivo']}"
-                )
-        with col2:
-            if st.button("🗑️ Excluir", key=f"delete_{backup['arquivo']}"):
-                try:
-                    os.remove(backup['caminho'])
-                    st.success("Backup removido com sucesso!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Erro ao remover backup: {str(e)}")
+        # Botões de ação para cada backup
+        for backup in backups:
+            col1, col2, col3 = st.columns([2, 1, 1])
+            with col1:
+                st.write(f"📁 {backup['arquivo']}")
+            with col2:
+                with open(backup['caminho'], 'rb') as file:
+                    st.download_button(
+                        "📥 Download",
+                        file,
+                        file_name=backup['arquivo'],
+                        mime="application/octet-stream",
+                        key=f"download_{backup['arquivo']}"
+                    )
+            with col3:
+                if st.button("🗑️ Excluir", key=f"delete_{backup['arquivo']}"):
+                    try:
+                        os.remove(backup['caminho'])
+                        st.success("Backup removido com sucesso!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erro ao remover backup: {str(e)}")
 
 def restaurar_backup():
     try:
