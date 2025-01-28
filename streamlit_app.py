@@ -2559,13 +2559,16 @@ def configuracoes():
                         if not os.path.exists(backup_dir):
                             os.makedirs(backup_dir)
                         
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        # Usar timezone de São Paulo para o timestamp
+                        sp_tz = pytz.timezone('America/Sao_Paulo')
+                        timestamp = datetime.now(sp_tz).strftime("%Y%m%d_%H%M%S")
                         
                         conn = sqlite3.connect('database/requisicoes.db')
                         df = pd.read_sql_query("SELECT * FROM requisicoes", conn)
                         
                         # Salvar como JSON
-                        with open(f'{backup_dir}/backup_{timestamp}.json', 'w', encoding='utf-8') as f:
+                        backup_filename = f'backup_manual_{timestamp}.json'
+                        with open(f'{backup_dir}/{backup_filename}', 'w', encoding='utf-8') as f:
                             json.dump(df.to_dict('records'), f, ensure_ascii=False, indent=2)
                         
                         conn.close()
@@ -2586,11 +2589,17 @@ def configuracoes():
                             file_path = os.path.join(backup_dir, backup_file)
                             file_size = os.path.getsize(file_path)
                             creation_time = os.path.getctime(file_path)
+                            
+                            # Converter para timezone de São Paulo
+                            sp_tz = pytz.timezone('America/Sao_Paulo')
+                            creation_datetime = datetime.fromtimestamp(creation_time)
+                            creation_datetime = pytz.utc.localize(creation_datetime).astimezone(sp_tz)
+                            
                             backup_info.append({
                                 'arquivo': backup_file,
                                 'caminho': file_path,
                                 'tamanho': file_size,
-                                'data_criacao': creation_time
+                                'data_criacao': creation_datetime
                             })
                         
                         # Ordena por data de criação (mais recente primeiro)
@@ -2603,9 +2612,8 @@ def configuracoes():
                                 st.text(backup['arquivo'])
                             
                             with col2:
-                                # Formata a data e hora
-                                data_hora = datetime.fromtimestamp(backup['data_criacao'])
-                                st.text(data_hora.strftime('%d/%m/%Y %H:%M:%S'))
+                                # Formata a data e hora no timezone de São Paulo
+                                st.text(backup['data_criacao'].strftime('%d/%m/%Y %H:%M:%S'))
                             
                             with col3:
                                 # Identifica se é backup automático ou manual
