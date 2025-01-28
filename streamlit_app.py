@@ -2564,62 +2564,63 @@ def configuracoes():
                                 if os.path.exists('backups/pre_restore.db'):
                                     shutil.copy2('backups/pre_restore.db', 'database/requisicoes.db')
                 
-                st.markdown("#### Visualização de Dados")
-                if st.button("🔍 Visualizar Dados do Banco", type="primary"):
-                    try:
-                        conn = sqlite3.connect('database/requisicoes.db')
-                        df = pd.read_sql_query("SELECT * FROM requisicoes", conn)
-                        st.dataframe(df)
-                        conn.close()
-                    except Exception as e:
-                        st.error("Erro ao visualizar dados")
-                
-                if st.button("💾 Backup Manual", type="primary"):
-                    try:
-                        backup_dir = "backups"
-                        if not os.path.exists(backup_dir):
-                            os.makedirs(backup_dir)
-                        
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        
-                        conn = sqlite3.connect('database/requisicoes.db')
-                        df = pd.read_sql_query("SELECT * FROM requisicoes", conn)
-                        
-                        # Salvar como JSON
-                        with open(f'{backup_dir}/backup_{timestamp}.json', 'w', encoding='utf-8') as f:
-                            json.dump(df.to_dict('records'), f, ensure_ascii=False, indent=2)
-                        
-                        conn.close()
-                        st.success("Backup realizado com sucesso!")
-                    except Exception as e:
-                        st.error(f"Erro ao criar backup: {str(e)}")
-                
-                # Lista de Backups
                 st.markdown("#### Backups Disponíveis")
                 backup_dir = "backups"
                 if os.path.exists(backup_dir):
-                    backup_files = [f for f in os.listdir(backup_dir) if f.endswith(('.zip', '.json', '.txt', '.py'))]
+                    backup_files = [f for f in os.listdir(backup_dir) if f.startswith('backup_')]
+                    backup_files.sort(reverse=True)  # Ordena do mais recente para o mais antigo
                     
                     if backup_files:
-                        for backup_file in backup_files:
-                            col1, col2, col3 = st.columns([3, 1, 1])
+                        st.markdown("""
+                            <style>
+                            .backup-item {
+                                background-color: white;
+                                padding: 10px;
+                                border-radius: 5px;
+                                margin: 5px 0;
+                                display: flex;
+                                justify-content: space-between;
+                                align-items: center;
+                            }
+                            .backup-info {
+                                display: flex;
+                                gap: 20px;
+                                align-items: center;
+                            }
+                            </style>
+                        """, unsafe_allow_html=True)
+                        
+                        for backup_file in backup_files[:20]:  # Limita a 20 backups
                             file_path = os.path.join(backup_dir, backup_file)
                             file_size = os.path.getsize(file_path)
+                            file_date = datetime.fromtimestamp(os.path.getctime(file_path))
                             
+                            col1, col2, col3, col4 = st.columns([2,2,1,1])
                             with col1:
                                 st.text(backup_file)
                             with col2:
-                                st.text(f"{file_size/1024:.2f} KB")
+                                st.text(file_date.strftime('%d/%m/%Y %H:%M:%S'))
                             with col3:
-                                with open(file_path, "rb") as f:
-                                    bytes_data = f.read()
-                                    st.download_button(
-                                        label="⬇️",
-                                        data=bytes_data,
-                                        file_name=backup_file,
-                                        mime="application/octet-stream",
-                                        key=f"download_{backup_file}"
-                                    )
+                                st.text(f"{file_size/1024:.1f} KB")
+                            with col4:
+                                col4_1, col4_2 = st.columns(2)
+                                with col4_1:
+                                    with open(file_path, "rb") as f:
+                                        st.download_button(
+                                            "📥",
+                                            f,
+                                            file_name=backup_file,
+                                            mime="application/octet-stream",
+                                            key=f"download_{backup_file}"
+                                        )
+                                with col4_2:
+                                    if st.button("🗑️", key=f"delete_{backup_file}"):
+                                        try:
+                                            os.remove(file_path)
+                                            st.success("Backup removido com sucesso!")
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(f"Erro ao remover backup: {str(e)}")
                     else:
                         st.info("Nenhum arquivo de backup encontrado.")
                 else:
