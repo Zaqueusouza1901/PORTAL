@@ -2465,23 +2465,47 @@ def configuracoes():
             with tab1:
                 st.markdown("#### Monitoramento do Sistema")
                 
-                # Métricas de Armazenamento
+                # Gráfico de Pizza para Espaço de Armazenamento
+                backup_dir = "backups"
                 total_space = 1024 * 1024 * 1024  # 1GB em bytes
-                used_space = sum(os.path.getsize(os.path.join('backups', f)) 
-                               for f in os.listdir('backups') 
+                used_space = sum(os.path.getsize(os.path.join(backup_dir, f)) 
+                               for f in os.listdir(backup_dir) 
                                if f.startswith('backup_'))
                 free_space = total_space - used_space
-                
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("💾 Espaço Total", f"{total_space/1024/1024:.1f} MB")
-                with col2:
-                    st.metric("📊 Espaço Utilizado", f"{used_space/1024/1024:.1f} MB")
-                with col3:
-                    st.metric("✨ Espaço Livre", f"{(total_space-used_space)/1024/1024:.1f} MB")
-                
-                # Ações do Sistema
-                col1, col2, col3 = st.columns(3)
+
+                fig = go.Figure(data=[go.Pie(
+                    labels=['Espaço Utilizado', 'Espaço Livre'],
+                    values=[used_space/1024/1024, free_space/1024/1024],
+                    hole=.7,
+                    marker_colors=['#2D2C74', '#E3F2FD'],
+                    textinfo='percent',
+                    textfont_size=20,
+                    showlegend=True
+                )])
+
+                fig.update_layout(
+                    title="Armazenamento de Backups",
+                    annotations=[dict(
+                        text=f'{used_space/1024/1024:.1f}MB<br>de 1GB',
+                        x=0.5, y=0.5,
+                        font_size=14,
+                        showarrow=False
+                    )],
+                    height=300,
+                    showlegend=True,
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=-0.2,
+                        xanchor="center",
+                        x=0.5
+                    )
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Botões de Ação
+                col1, col2 = st.columns(2)
                 with col1:
                     if st.button("🔍 Visualizar Banco de Dados", type="primary", use_container_width=True):
                         try:
@@ -2491,100 +2515,91 @@ def configuracoes():
                             conn.close()
                         except Exception as e:
                             st.error("Erro ao visualizar dados")
-                
+
                 with col2:
                     if st.button("💾 Backup Manual", type="primary", use_container_width=True):
                         try:
                             backup_file, backup_size = backup_automatico()
                             if backup_file:
                                 st.success("Backup realizado com sucesso!")
+                                st.rerun()
                             else:
                                 st.error("Erro ao realizar backup")
                         except Exception as e:
                             st.error(f"Erro ao criar backup: {str(e)}")
-                
-                with col3:
-                    dias_manter = st.number_input("Dias para manter backups", min_value=1, value=7)
-                    if st.button("🗑️ Limpar Backups Antigos", type="primary", use_container_width=True):
-                        limpar_backups_antigos('backups', dias_manter)
-                        st.success(f"Backups mais antigos que {dias_manter} dias foram removidos!")
-                        st.rerun()
-                
+
                 # Lista de Backups
                 st.markdown("### 📁 Backups Disponíveis")
-                backup_dir = "backups"
-                
-                if os.path.exists(backup_dir):
-                    backups = []
-                    for arquivo in os.listdir(backup_dir):
-                        if arquivo.startswith('backup_'):
-                            caminho = os.path.join(backup_dir, arquivo)
-                            tamanho = os.path.getsize(caminho)
-                            data_criacao = datetime.fromtimestamp(os.path.getctime(caminho))
-                            tipo = 'AUTOMÁTICO' if 'auto' in arquivo.lower() else 'MANUAL'
-                            
-                            backups.append({
-                                'arquivo': arquivo,
-                                'data': data_criacao,
-                                'tipo': tipo,
-                                'tamanho': tamanho,
-                                'caminho': caminho
-                            })
-                    
-                    # Ordenar por data mais recente
-                    backups.sort(key=lambda x: x['data'], reverse=True)
-                    backups = backups[:20]  # Limitar a 20 backups
-                    
-                    for backup in backups:
-                        with st.container():
-                            col1, col2, col3, col4 = st.columns([2,2,1,1])
-                            
-                            with col1:
-                                st.markdown(f"""
-                                    <div style='padding: 10px; 
-                                              background-color: {'#E3F2FD' if backup['tipo'] == 'AUTOMÁTICO' else '#FFF3E0'}; 
-                                              border-radius: 5px;'>
-                                        <span style='color: {'#1976D2' if backup['tipo'] == 'AUTOMÁTICO' else '#F57C00'};
-                                                    font-weight: bold;'>
-                                            {backup['tipo']}
-                                        </span>
-                                    </div>
-                                """, unsafe_allow_html=True)
-                            
-                            with col2:
-                                st.markdown(f"""
-                                    <div style='padding: 10px; background-color: white; border-radius: 5px;'>
-                                        📅 {backup['data'].strftime('%d/%m/%Y %H:%M:%S')}
-                                    </div>
-                                """, unsafe_allow_html=True)
-                            
-                            with col3:
-                                tamanho_fmt = f"{backup['tamanho']/1024/1024:.1f} MB"
-                                st.markdown(f"""
-                                    <div style='padding: 10px; background-color: white; border-radius: 5px;'>
-                                        💾 {tamanho_fmt}
-                                    </div>
-                                """, unsafe_allow_html=True)
-                            
-                            with col4:
-                                col4_1, col4_2 = st.columns(2)
-                                with col4_1:
-                                    with open(backup['caminho'], 'rb') as file:
-                                        st.download_button(
-                                            "📥",
-                                            file,
-                                            file_name=backup['arquivo'],
-                                            mime="application/octet-stream",
-                                            key=f"download_{backup['arquivo']}"
-                                        )
-                                with col4_2:
-                                    if st.button("🗑️", key=f"delete_{backup['arquivo']}"):
-                                        try:
-                                            os.remove(backup['caminho'])
-                                            st.success("Backup removido com sucesso!")
-                                            st.rerun()
-                                        except Exception as e:
-                                            st.error(f"Erro ao remover backup: {str(e)}")
+                backups = []
+                for arquivo in os.listdir(backup_dir):
+                    if arquivo.startswith('backup_'):
+                        caminho = os.path.join(backup_dir, arquivo)
+                        tamanho = os.path.getsize(caminho)
+                        data_criacao = datetime.fromtimestamp(os.path.getctime(caminho))
+                        tipo = 'AUTOMÁTICO' if 'auto' in arquivo.lower() else 'MANUAL'
+                        
+                        backups.append({
+                            'arquivo': arquivo,
+                            'data': data_criacao,
+                            'tipo': tipo,
+                            'tamanho': tamanho,
+                            'caminho': caminho
+                        })
+
+                # Ordenar por data mais recente e limitar a 20
+                backups.sort(key=lambda x: x['data'], reverse=True)
+                backups = backups[:20]
+
+                for backup in backups:
+                    with st.container():
+                        col1, col2, col3, col4 = st.columns([2,2,1,1])
+                        
+                        with col1:
+                            st.markdown(f"""
+                                <div style='padding: 10px; 
+                                          background-color: {'#E3F2FD' if backup['tipo'] == 'AUTOMÁTICO' else '#FFF3E0'}; 
+                                          border-radius: 5px;'>
+                                    <span style='color: {'#1976D2' if backup['tipo'] == 'AUTOMÁTICO' else '#F57C00'};
+                                                font-weight: bold;'>
+                                        {backup['tipo']}
+                                    </span>
+                                </div>
+                            """, unsafe_allow_html=True)
+                        
+                        with col2:
+                            st.markdown(f"""
+                                <div style='padding: 10px; background-color: white; border-radius: 5px;'>
+                                    📅 {backup['data'].strftime('%d/%m/%Y %H:%M:%S')}
+                                </div>
+                            """, unsafe_allow_html=True)
+                        
+                        with col3:
+                            tamanho_fmt = f"{backup['tamanho']/1024/1024:.1f} MB"
+                            st.markdown(f"""
+                                <div style='padding: 10px; background-color: white; border-radius: 5px;'>
+                                    💾 {tamanho_fmt}
+                                </div>
+                            """, unsafe_allow_html=True)
+                        
+                        with col4:
+                            col4_1, col4_2 = st.columns(2)
+                            with col4_1:
+                                with open(backup['caminho'], 'rb') as file:
+                                    st.download_button(
+                                        "📥",
+                                        file,
+                                        file_name=backup['arquivo'],
+                                        mime="application/octet-stream",
+                                        key=f"download_{backup['arquivo']}"
+                                    )
+                            with col4_2:
+                                if st.button("🗑️", key=f"delete_{backup['arquivo']}"):
+                                    try:
+                                        os.remove(backup['caminho'])
+                                        st.success("Backup removido com sucesso!")
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Erro ao remover backup: {str(e)}")
                     
 def main():
     # Inicializar o banco de dados
