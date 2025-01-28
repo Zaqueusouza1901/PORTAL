@@ -2580,25 +2580,68 @@ def configuracoes():
                     backup_files = [f for f in os.listdir(backup_dir) if f.endswith(('.zip', '.json', '.txt', '.py'))]
                     
                     if backup_files:
+                        # Organiza os backups por data de criação (mais recente primeiro)
+                        backup_info = []
                         for backup_file in backup_files:
-                            col1, col2, col3 = st.columns([3, 1, 1])
                             file_path = os.path.join(backup_dir, backup_file)
                             file_size = os.path.getsize(file_path)
+                            creation_time = os.path.getctime(file_path)
+                            backup_info.append({
+                                'arquivo': backup_file,
+                                'caminho': file_path,
+                                'tamanho': file_size,
+                                'data_criacao': creation_time
+                            })
+                        
+                        # Ordena por data de criação (mais recente primeiro)
+                        backup_info.sort(key=lambda x: x['data_criacao'], reverse=True)
+                        
+                        for backup in backup_info:
+                            col1, col2, col3, col4, col5 = st.columns([3, 2, 2, 1, 1])
                             
                             with col1:
-                                st.text(backup_file)
+                                st.text(backup['arquivo'])
+                            
                             with col2:
-                                st.text(f"{file_size/1024:.2f} KB")
+                                # Formata a data e hora
+                                data_hora = datetime.fromtimestamp(backup['data_criacao'])
+                                st.text(data_hora.strftime('%d/%m/%Y %H:%M:%S'))
+                            
                             with col3:
-                                with open(file_path, "rb") as f:
-                                    bytes_data = f.read()
-                                    st.download_button(
-                                        label="⬇️",
-                                        data=bytes_data,
-                                        file_name=backup_file,
-                                        mime="application/octet-stream",
-                                        key=f"download_{backup_file}"
-                                    )
+                                # Identifica se é backup automático ou manual
+                                tipo = 'AUTOMÁTICO' if 'auto' in backup['arquivo'].lower() else 'MANUAL'
+                                st.text(tipo)
+                            
+                            with col4:
+                                # Formata o tamanho do arquivo
+                                if backup['tamanho'] < 1024:
+                                    tamanho_fmt = f"{backup['tamanho']} B"
+                                elif backup['tamanho'] < 1024**2:
+                                    tamanho_fmt = f"{backup['tamanho']/1024:.1f} KB"
+                                else:
+                                    tamanho_fmt = f"{backup['tamanho']/1024**2:.1f} MB"
+                                st.text(tamanho_fmt)
+                            
+                            with col5:
+                                col5_1, col5_2 = st.columns(2)
+                                with col5_1:
+                                    with open(backup['caminho'], "rb") as f:
+                                        bytes_data = f.read()
+                                        st.download_button(
+                                            label="⬇️",
+                                            data=bytes_data,
+                                            file_name=backup['arquivo'],
+                                            mime="application/octet-stream",
+                                            key=f"download_{backup['arquivo']}"
+                                        )
+                                with col5_2:
+                                    if st.button("🗑️", key=f"delete_{backup['arquivo']}"):
+                                        try:
+                                            os.remove(backup['caminho'])
+                                            st.success("Backup removido com sucesso!")
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(f"Erro ao remover backup: {str(e)}")
                     else:
                         st.info("Nenhum arquivo de backup encontrado.")
                 else:
