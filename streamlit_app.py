@@ -959,86 +959,81 @@ if 'perfis' not in st.session_state:
         }
         
 def tela_login():
-    st.markdown("""
-        <style>
-        div.stButton > button:first-child {
-            background-color: #0088ff;
-            color: white;
-            font-weight: bold;
-        }
-        div.stButton > button:hover {
-            background-color: #0066cc;
-            color: white;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-    
     st.title("PORTAL - JETFRIO")
     usuario = st.text_input("Usuário", key="usuario_input").upper()
     
     if usuario:
-        if usuario in st.session_state.usuarios:
-            user_data = st.session_state.usuarios[usuario]
+        # Verifica se o usuário existe no banco
+        conn = sqlite3.connect('database/usuarios.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM usuarios WHERE nome = ?', (usuario,))
+        user_data = cursor.fetchone()
+        conn.close()
+        
+        if user_data:
+            # Verifica status do usuário
+            if not user_data[5]:  # Coluna ativo
+                st.error("USUÁRIO INATIVO - CONTATE O ADMINISTRADOR")
+                return
             
-            if user_data.get('senha') is None or user_data.get('primeiro_acesso', True):
+            # Verifica se é primeiro acesso
+            primeiro_acesso = user_data[6]  # Coluna primeiro_acesso
+            senha_atual = user_data[3]      # Coluna senha
+            
+            if primeiro_acesso or senha_atual is None:
                 st.markdown("### 😊 Primeiro Acesso - Configure sua senha")
-                with st.form("primeiro_acesso_form"):
-                    nova_senha = st.text_input("Nova Senha", type="password", 
-                        help="Mínimo 8 caracteres, incluindo letra maiúscula, minúscula e número")
-                    confirma_senha = st.text_input("Confirme a Nova Senha", type="password")
-                    
-                    if st.form_submit_button("Cadastrar Senha"):
-                        if len(nova_senha) < 8:
-                            st.error("A senha deve ter no mínimo 8 caracteres")
-                            return
-                            
-                        if nova_senha != confirma_senha:
-                            st.error("As senhas não coincidem")
-                            return
-                            
-                        st.session_state.usuarios[usuario]['senha'] = gerar_hash_senha(nova_senha)
-                        st.session_state.usuarios[usuario]['primeiro_acesso'] = False
-                        st.session_state.usuarios[usuario]['data_ultimo_acesso'] = get_data_hora_brasil()
-                        if salvar_usuarios():
-                            st.success("Senha cadastrada com sucesso!")
-                            time.sleep(1)
-                            st.rerun()
-
-            else:
-                senha = st.text_input("Senha", type="password", key="senha_input")
-                col1, col2 = st.columns([1, 1])
+                nova_senha = st.text_input("Nova Senha", type="password")
+                confirma_senha = st.text_input("Confirme a Nova Senha", type="password")
                 
-                with col1:
-                    if st.button("Entrar", use_container_width=True, type="primary"):
-                        if not user_data.get('ativo', True):
-                            st.error("USUÁRIO INATIVO - CONTATE O ADMINISTRADOR")
-                            return
+                if st.button("Cadastrar Senha", type="primary"):
+                    if len(nova_senha) < 8:
+                        st.error("A senha deve ter no mínimo 8 caracteres")
+                        return
                         
-                        senha_digitada_hash = gerar_hash_senha(senha)
-                        senha_armazenada = user_data['senha']
-                        
-                        # Se a senha armazenada não for hash, compara diretamente
-                        if len(senha_armazenada) != 64:  # Tamanho do hash SHA-256
-                            if senha != senha_armazenada:
-                                st.error("Senha incorreta")
-                                return
-                            # Atualiza para o formato hash
-                            st.session_state.usuarios[usuario]['senha'] = senha_digitada_hash
-                            salvar_usuarios()
-                        else:
-                            # Compara os hashes
-                            if senha_digitada_hash != senha_armazenada:
-                                st.error("Senha incorreta")
-                                return
-                            
-                        st.session_state['usuario'] = usuario
-                        st.session_state['perfil'] = user_data['perfil']
-                        st.session_state.usuarios[usuario]['data_ultimo_acesso'] = get_data_hora_brasil()
-                        salvar_usuarios()
-                        st.success(f"Bem-vindo, {usuario}!")
-                        time.sleep(1)
-                        st.rerun()
-
+                    if nova_senha != confirma_senha:
+                        st.error("As senhas não coincidem")
+                        return
+                    
+                    # Atualiza senha e status no banco
+                    conn = sqlite3.connect('database/usuarios.db')
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                        UPDATE usuarios 
+                        SET senha = ?, 
+                            primeiro_acesso = 0, 
+                            data_modificacao = ?
+                        WHERE nome = ?
+                    ''', (gerar_hash_senha(nova_senha), get_data_hora_brasil(), usuario))
+                    conn.commit()
+                    conn.close()
+                    
+                    st.success("Senha cadastrada com sucesso!")
+                    time.sleep(1)
+                    st.rerun()
+            else:
+                senha = st.text_input("Senha", type="password")
+                if st.button("Entrar", type="primary"):
+                    senha_hash = gerar_hash_senha(senha)
+                    if senha_hash != user_data[3]:  # Coluna senha
+                        st.error("Senha incorreta")
+                        return
+                    
+                    # Atualiza último acesso
+                    conn = sqlite3.connect('database/usuarios.db')
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                        UPDATE usuarios 
+                        SET data_ultimo_acesso = ?
+                        WHERE nome = ?
+                    ''', (get_data_hora_brasil(), usuario))
+                    conn.commit()
+                    conn.close()
+                    
+                    st.session_state['usuario'] = usuario
+                    st.session_state['perfil'] = user_data[4]  # Coluna perfil
+                    st.success(f"Bem-vindo, {usuario}!")
+                    time.sleep(1)
+                    st.rerun()
 
 def menu_lateral():
     with st.sidebar:
