@@ -2465,141 +2465,144 @@ def configuracoes():
             with tab1:
                 st.markdown("#### Monitoramento do Sistema")
                 
-                # Gráfico de Pizza para Espaço de Armazenamento
-                backup_dir = "backups"
-                total_space = 1024 * 1024 * 1024  # 1GB em bytes
-                used_space = sum(os.path.getsize(os.path.join(backup_dir, f)) 
-                               for f in os.listdir(backup_dir) 
-                               if f.startswith('backup_'))
-                free_space = total_space - used_space
-
-                fig = go.Figure(data=[go.Pie(
-                    labels=['Espaço Utilizado', 'Espaço Livre'],
-                    values=[used_space/1024/1024, free_space/1024/1024],
-                    hole=.7,
-                    marker_colors=['#2D2C74', '#E3F2FD'],
-                    textinfo='percent',
-                    textfont_size=20,
-                    showlegend=True
-                )])
-
-                fig.update_layout(
-                    title="Armazenamento de Backups",
-                    annotations=[dict(
-                        text=f'{used_space/1024/1024:.1f}MB<br>de 1GB',
-                        x=0.5, y=0.5,
-                        font_size=14,
-                        showarrow=False
-                    )],
-                    height=300,
-                    showlegend=True,
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=-0.2,
-                        xanchor="center",
-                        x=0.5
-                    )
-                )
-
-                st.plotly_chart(fig, use_container_width=True)
-
-                # Botões de Ação
                 col1, col2 = st.columns(2)
+                
                 with col1:
-                    if st.button("🔍 Visualizar Banco de Dados", type="primary", use_container_width=True):
-                        try:
-                            conn = sqlite3.connect('database/requisicoes.db')
-                            df = pd.read_sql_query("SELECT * FROM requisicoes", conn)
-                            st.dataframe(df)
-                            conn.close()
-                        except Exception as e:
-                            st.error("Erro ao visualizar dados")
-
+                    st.markdown("##### Banco de Dados")
+                    try:
+                        conn = sqlite3.connect('database/requisicoes.db')
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT COUNT(*) FROM requisicoes")
+                        total_requisicoes = cursor.fetchone()[0]
+                        
+                        db_size = os.path.getsize('database/requisicoes.db') / (1024 * 1024)
+                        
+                        st.metric("Total de Requisições", total_requisicoes)
+                        st.metric("Tamanho do Banco", f"{db_size:.2f} MB")
+                        conn.close()
+                    except Exception as e:
+                        st.error("Erro ao acessar banco de dados")
+                
                 with col2:
-                    if st.button("💾 Backup Manual", type="primary", use_container_width=True):
-                        try:
-                            backup_file, backup_size = backup_automatico()
-                            if backup_file:
-                                st.success("Backup realizado com sucesso!")
+                    st.markdown("##### Importação de Backup")
+                    uploaded_file = st.file_uploader(
+                        "Selecione o arquivo de backup",
+                        type=['json', 'txt', 'py'],
+                        help="Arquivos suportados: JSON, TXT, PY"
+                    )
+                    
+                    if uploaded_file is not None:
+                        if st.button("📥 Restaurar Backup", type="primary"):
+                            try:
+                                # Backup preventivo
+                                if os.path.exists('database/requisicoes.db'):
+                                    shutil.copy2('database/requisicoes.db', 'backups/pre_restore.db')
+                                
+                                # Processar arquivo baseado na extensão
+                                if uploaded_file.name.endswith('.json'):
+                                    dados = json.loads(uploaded_file.getvalue().decode('utf-8'))
+                                elif uploaded_file.name.endswith('.txt'):
+                                    dados = pd.read_csv(uploaded_file, sep='\t').to_dict('records')
+                                elif uploaded_file.name.endswith('.py'):
+                                    conteudo = uploaded_file.getvalue().decode('utf-8')
+                                    dados_str = conteudo.replace('dados = ', '')
+                                    dados = eval(dados_str)
+                                
+                                # Conectar e inserir dados
+                                conn = sqlite3.connect('database/requisicoes.db')
+                                cursor = conn.cursor()
+                                
+                                for req in dados:
+                                    cursor.execute('''
+                                        INSERT OR REPLACE INTO requisicoes 
+                                        (numero, cliente, vendedor, data_hora, status, items, 
+                                        observacoes_vendedor, comprador_responsavel, data_hora_resposta,
+                                        justificativa_recusa, observacao_geral)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    ''', (
+                                        str(req['numero']),
+                                        req['cliente'],
+                                        req['vendedor'],
+                                        req['data_hora'],
+                                        req['status'],
+                                        req['items'] if isinstance(req['items'], str) else json.dumps(req['items']),
+                                        req.get('observacoes_vendedor', ''),
+                                        req.get('comprador_responsavel', ''),
+                                        req.get('data_hora_resposta', ''),
+                                        req.get('justificativa_recusa', ''),
+                                        req.get('observacao_geral', '')
+                                    ))
+                                
+                                conn.commit()
+                                conn.close()
+                                st.success(f"Backup restaurado com sucesso! {len(dados)} requisições importadas.")
                                 st.rerun()
-                            else:
-                                st.error("Erro ao realizar backup")
-                        except Exception as e:
-                            st.error(f"Erro ao criar backup: {str(e)}")
-
+                                
+                            except Exception as e:
+                                st.error(f"Erro na restauração: {str(e)}")
+                                if os.path.exists('backups/pre_restore.db'):
+                                    shutil.copy2('backups/pre_restore.db', 'database/requisicoes.db')
+                
+                st.markdown("#### Visualização de Dados")
+                if st.button("🔍 Visualizar Dados do Banco", type="primary"):
+                    try:
+                        conn = sqlite3.connect('database/requisicoes.db')
+                        df = pd.read_sql_query("SELECT * FROM requisicoes", conn)
+                        st.dataframe(df)
+                        conn.close()
+                    except Exception as e:
+                        st.error("Erro ao visualizar dados")
+                
+                if st.button("💾 Backup Manual", type="primary"):
+                    try:
+                        backup_dir = "backups"
+                        if not os.path.exists(backup_dir):
+                            os.makedirs(backup_dir)
+                        
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        
+                        conn = sqlite3.connect('database/requisicoes.db')
+                        df = pd.read_sql_query("SELECT * FROM requisicoes", conn)
+                        
+                        # Salvar como JSON
+                        with open(f'{backup_dir}/backup_{timestamp}.json', 'w', encoding='utf-8') as f:
+                            json.dump(df.to_dict('records'), f, ensure_ascii=False, indent=2)
+                        
+                        conn.close()
+                        st.success("Backup realizado com sucesso!")
+                    except Exception as e:
+                        st.error(f"Erro ao criar backup: {str(e)}")
+                
                 # Lista de Backups
-                st.markdown("### 📁 Backups Disponíveis")
-                backups = []
-                for arquivo in os.listdir(backup_dir):
-                    if arquivo.startswith('backup_'):
-                        caminho = os.path.join(backup_dir, arquivo)
-                        tamanho = os.path.getsize(caminho)
-                        data_criacao = datetime.fromtimestamp(os.path.getctime(caminho))
-                        tipo = 'AUTOMÁTICO' if 'auto' in arquivo.lower() else 'MANUAL'
-                        
-                        backups.append({
-                            'arquivo': arquivo,
-                            'data': data_criacao,
-                            'tipo': tipo,
-                            'tamanho': tamanho,
-                            'caminho': caminho
-                        })
-
-                # Ordenar por data mais recente e limitar a 20
-                backups.sort(key=lambda x: x['data'], reverse=True)
-                backups = backups[:20]
-
-                for backup in backups:
-                    with st.container():
-                        col1, col2, col3, col4 = st.columns([2,2,1,1])
-                        
-                        with col1:
-                            st.markdown(f"""
-                                <div style='padding: 10px; 
-                                          background-color: {'#E3F2FD' if backup['tipo'] == 'AUTOMÁTICO' else '#FFF3E0'}; 
-                                          border-radius: 5px;'>
-                                    <span style='color: {'#1976D2' if backup['tipo'] == 'AUTOMÁTICO' else '#F57C00'};
-                                                font-weight: bold;'>
-                                        {backup['tipo']}
-                                    </span>
-                                </div>
-                            """, unsafe_allow_html=True)
-                        
-                        with col2:
-                            st.markdown(f"""
-                                <div style='padding: 10px; background-color: white; border-radius: 5px;'>
-                                    📅 {backup['data'].strftime('%d/%m/%Y %H:%M:%S')}
-                                </div>
-                            """, unsafe_allow_html=True)
-                        
-                        with col3:
-                            tamanho_fmt = f"{backup['tamanho']/1024/1024:.1f} MB"
-                            st.markdown(f"""
-                                <div style='padding: 10px; background-color: white; border-radius: 5px;'>
-                                    💾 {tamanho_fmt}
-                                </div>
-                            """, unsafe_allow_html=True)
-                        
-                        with col4:
-                            col4_1, col4_2 = st.columns(2)
-                            with col4_1:
-                                with open(backup['caminho'], 'rb') as file:
+                st.markdown("#### Backups Disponíveis")
+                backup_dir = "backups"
+                if os.path.exists(backup_dir):
+                    backup_files = [f for f in os.listdir(backup_dir) if f.endswith(('.zip', '.json', '.txt', '.py'))]
+                    
+                    if backup_files:
+                        for backup_file in backup_files:
+                            col1, col2, col3 = st.columns([3, 1, 1])
+                            file_path = os.path.join(backup_dir, backup_file)
+                            file_size = os.path.getsize(file_path)
+                            
+                            with col1:
+                                st.text(backup_file)
+                            with col2:
+                                st.text(f"{file_size/1024:.2f} KB")
+                            with col3:
+                                with open(file_path, "rb") as f:
+                                    bytes_data = f.read()
                                     st.download_button(
-                                        "📥",
-                                        file,
-                                        file_name=backup['arquivo'],
+                                        label="⬇️",
+                                        data=bytes_data,
+                                        file_name=backup_file,
                                         mime="application/octet-stream",
-                                        key=f"download_{backup['arquivo']}"
+                                        key=f"download_{backup_file}"
                                     )
-                            with col4_2:
-                                if st.button("🗑️", key=f"delete_{backup['arquivo']}"):
-                                    try:
-                                        os.remove(backup['caminho'])
-                                        st.success("Backup removido com sucesso!")
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(f"Erro ao remover backup: {str(e)}")
+                    else:
+                        st.info("Nenhum arquivo de backup encontrado.")
+                else:
+                    st.warning("Diretório de backup não encontrado.")
                     
 def main():
     # Inicializar o banco de dados
