@@ -2564,32 +2564,37 @@ def configuracoes():
                                 if os.path.exists('backups/pre_restore.db'):
                                     shutil.copy2('backups/pre_restore.db', 'database/requisicoes.db')
                 
-                st.markdown("#### Backups Disponíveis")
+                # Botões de Visualizar Banco e Backup Manual
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("🔍 Visualizar Dados do Banco", type="primary", use_container_width=True):
+                        try:
+                            conn = sqlite3.connect('database/requisicoes.db')
+                            df = pd.read_sql_query("SELECT * FROM requisicoes", conn)
+                            st.dataframe(df)
+                            conn.close()
+                        except Exception as e:
+                            st.error("Erro ao visualizar dados")
+                
+                with col2:
+                    if st.button("💾 Backup Manual", type="primary", use_container_width=True):
+                        try:
+                            backup_file, backup_size = backup_automatico()
+                            if backup_file:
+                                st.success("Backup realizado com sucesso!")
+                            else:
+                                st.error("Erro ao realizar backup")
+                        except Exception as e:
+                            st.error(f"Erro ao criar backup: {str(e)}")
+                
+                # Exibição dos Backups com visual melhorado
+                st.markdown("### 📁 Backups Disponíveis")
                 backup_dir = "backups"
                 if os.path.exists(backup_dir):
                     backup_files = [f for f in os.listdir(backup_dir) if f.startswith('backup_')]
                     backup_files.sort(reverse=True)  # Ordena do mais recente para o mais antigo
                     
                     if backup_files:
-                        st.markdown("""
-                            <style>
-                            .backup-item {
-                                background-color: white;
-                                padding: 10px;
-                                border-radius: 5px;
-                                margin: 5px 0;
-                                display: flex;
-                                justify-content: space-between;
-                                align-items: center;
-                            }
-                            .backup-info {
-                                display: flex;
-                                gap: 20px;
-                                align-items: center;
-                            }
-                            </style>
-                        """, unsafe_allow_html=True)
-                        
                         for backup_file in backup_files[:20]:  # Limita a 20 backups
                             file_path = os.path.join(backup_dir, backup_file)
                             file_size = os.path.getsize(file_path)
