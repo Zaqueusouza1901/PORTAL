@@ -415,8 +415,16 @@ def carregar_usuarios():
     try:
         with open('usuarios.json', 'r', encoding='utf-8') as f:
             usuarios = json.load(f)
+            # Garante que todos os campos necessários existam
+            for usuario, dados in usuarios.items():
+                if 'senha' not in dados:
+                    dados['senha'] = None
+                if 'primeiro_acesso' not in dados:
+                    dados['primeiro_acesso'] = True
+                if 'ativo' not in dados:
+                    dados['ativo'] = True
             return usuarios
-    except json.JSONDecodeError:
+    except FileNotFoundError:
         # Retorna usuário padrão em caso de erro
         return {
             'ZAQUEU SOUZA': {
@@ -431,25 +439,29 @@ def carregar_usuarios():
 def salvar_usuarios():
     try:
         backup_file = 'usuarios.json.bak'
-        # Fazer backup do arquivo atual
+        
+        # Fazer backup do arquivo atual antes de qualquer alteração
         if os.path.exists('usuarios.json'):
             shutil.copy2('usuarios.json', backup_file)
-            
-        # Salvar os dados garantindo que primeiro_acesso seja salvo corretamente
-        with open('usuarios.json', 'w', encoding='utf-8') as f:
-            usuarios_para_salvar = {
-                usuario: {
-                    'senha': str(dados['senha']),
-                    'perfil': dados['perfil'],
-                    'email': dados['email'],
-                    'ativo': dados['ativo'],
-                    'primeiro_acesso': dados.get('primeiro_acesso', True)
-                }
-                for usuario, dados in st.session_state.usuarios.items()
+        
+        # Preparar dados para salvar, mantendo todas as informações necessárias
+        usuarios_para_salvar = {}
+        for usuario, dados in st.session_state.usuarios.items():
+            usuarios_para_salvar[usuario] = {
+                'senha': dados.get('senha'),  # Mantém o hash da senha como está
+                'perfil': dados['perfil'],
+                'email': dados['email'],
+                'ativo': dados.get('ativo', True),
+                'primeiro_acesso': dados.get('primeiro_acesso', True),
+                'data_ultimo_acesso': dados.get('data_ultimo_acesso', ''),
+                'permissoes': dados.get('permissoes', get_permissoes_perfil(dados['perfil']))
             }
+        
+        # Salvar os dados no arquivo
+        with open('usuarios.json', 'w', encoding='utf-8') as f:
             json.dump(usuarios_para_salvar, f, ensure_ascii=False, indent=4)
             
-        # Verificar integridade
+        # Verificar integridade do arquivo salvo
         with open('usuarios.json', 'r', encoding='utf-8') as f:
             json.load(f)  # Tenta ler o arquivo para verificar se está válido
             
@@ -458,11 +470,12 @@ def salvar_usuarios():
             os.remove(backup_file)
             
         return True
+        
     except Exception as e:
         # Restaura backup em caso de erro
         if os.path.exists(backup_file):
             shutil.copy2(backup_file, 'usuarios.json')
-        st.error(f"Erro ao salvar usuários: {str(e)}")
+        logging.error(f"Erro ao salvar usuários: {str(e)}")
         return False
 
 def migrar_dados_json_para_sqlite():
@@ -980,7 +993,8 @@ def tela_login():
         if usuario in st.session_state.usuarios:
             user_data = st.session_state.usuarios[usuario]
             
-            if user_data.get('senha') is None or user_data.get('primeiro_acesso', True):
+            # Simplifica a verificação de primeiro acesso
+            if user_data.get('senha') is None:
                 st.markdown("### 😊 Primeiro Acesso - Configure sua senha")
                 with st.form("primeiro_acesso_form"):
                     nova_senha = st.text_input("Nova Senha", type="password", 
@@ -996,9 +1010,13 @@ def tela_login():
                             st.error("As senhas não coincidem")
                             return
                             
-                        st.session_state.usuarios[usuario]['senha'] = gerar_hash_senha(nova_senha)
-                        st.session_state.usuarios[usuario]['primeiro_acesso'] = False
-                        st.session_state.usuarios[usuario]['data_ultimo_acesso'] = get_data_hora_brasil()
+                        senha_hash = gerar_hash_senha(nova_senha)
+                        st.session_state.usuarios[usuario].update({
+                            'senha': senha_hash,
+                            'primeiro_acesso': False,
+                            'data_ultimo_acesso': get_data_hora_brasil()
+                        })
+                        
                         if salvar_usuarios():
                             st.success("Senha cadastrada com sucesso!")
                             time.sleep(1)
@@ -1017,28 +1035,23 @@ def tela_login():
                         senha_digitada_hash = gerar_hash_senha(senha)
                         senha_armazenada = user_data['senha']
                         
-                        # Se a senha armazenada não for hash, compara diretamente
-                        if len(senha_armazenada) != 64:  # Tamanho do hash SHA-256
-                            if senha != senha_armazenada:
-                                st.error("Senha incorreta")
-                                return
-                            # Atualiza para o formato hash
-                            st.session_state.usuarios[usuario]['senha'] = senha_digitada_hash
-                            salvar_usuarios()
-                        else:
-                            # Compara os hashes
-                            if senha_digitada_hash != senha_armazenada:
-                                st.error("Senha incorreta")
-                                return
+                        # Verifica a senha usando apenas o hash
+                        if senha_digitada_hash != senha_armazenada:
+                            st.error("Senha incorreta")
+                            return
                             
-                        st.session_state['usuario'] = usuario
-                        st.session_state['perfil'] = user_data['perfil']
+                        # Atualiza a sessão e dados do usuário
+                        st.session_state.update({
+                            'usuario': usuario,
+                            'perfil': user_data['perfil']
+                        })
+                        
                         st.session_state.usuarios[usuario]['data_ultimo_acesso'] = get_data_hora_brasil()
                         salvar_usuarios()
+                        
                         st.success(f"Bem-vindo, {usuario}!")
                         time.sleep(1)
                         st.rerun()
-
 
 def menu_lateral():
     with st.sidebar:
