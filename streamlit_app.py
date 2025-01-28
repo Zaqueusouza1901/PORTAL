@@ -415,16 +415,8 @@ def carregar_usuarios():
     try:
         with open('usuarios.json', 'r', encoding='utf-8') as f:
             usuarios = json.load(f)
-            # Garante que todos os campos necessários existam
-            for usuario, dados in usuarios.items():
-                if 'senha' not in dados:
-                    dados['senha'] = None
-                if 'primeiro_acesso' not in dados:
-                    dados['primeiro_acesso'] = True
-                if 'ativo' not in dados:
-                    dados['ativo'] = True
             return usuarios
-    except FileNotFoundError:
+    except json.JSONDecodeError:
         # Retorna usuário padrão em caso de erro
         return {
             'ZAQUEU SOUZA': {
@@ -439,29 +431,25 @@ def carregar_usuarios():
 def salvar_usuarios():
     try:
         backup_file = 'usuarios.json.bak'
-        
-        # Fazer backup do arquivo atual antes de qualquer alteração
+        # Fazer backup do arquivo atual
         if os.path.exists('usuarios.json'):
             shutil.copy2('usuarios.json', backup_file)
-        
-        # Preparar dados para salvar, mantendo todas as informações necessárias
-        usuarios_para_salvar = {}
-        for usuario, dados in st.session_state.usuarios.items():
-            usuarios_para_salvar[usuario] = {
-                'senha': dados.get('senha'),  # Mantém o hash da senha como está
-                'perfil': dados['perfil'],
-                'email': dados['email'],
-                'ativo': dados.get('ativo', True),
-                'primeiro_acesso': dados.get('primeiro_acesso', True),
-                'data_ultimo_acesso': dados.get('data_ultimo_acesso', ''),
-                'permissoes': dados.get('permissoes', get_permissoes_perfil(dados['perfil']))
-            }
-        
-        # Salvar os dados no arquivo
+            
+        # Salvar os dados garantindo que primeiro_acesso seja salvo corretamente
         with open('usuarios.json', 'w', encoding='utf-8') as f:
+            usuarios_para_salvar = {
+                usuario: {
+                    'senha': str(dados['senha']),
+                    'perfil': dados['perfil'],
+                    'email': dados['email'],
+                    'ativo': dados['ativo'],
+                    'primeiro_acesso': dados.get('primeiro_acesso', True)
+                }
+                for usuario, dados in st.session_state.usuarios.items()
+            }
             json.dump(usuarios_para_salvar, f, ensure_ascii=False, indent=4)
             
-        # Verificar integridade do arquivo salvo
+        # Verificar integridade
         with open('usuarios.json', 'r', encoding='utf-8') as f:
             json.load(f)  # Tenta ler o arquivo para verificar se está válido
             
@@ -470,12 +458,11 @@ def salvar_usuarios():
             os.remove(backup_file)
             
         return True
-        
     except Exception as e:
         # Restaura backup em caso de erro
         if os.path.exists(backup_file):
             shutil.copy2(backup_file, 'usuarios.json')
-        logging.error(f"Erro ao salvar usuários: {str(e)}")
+        st.error(f"Erro ao salvar usuários: {str(e)}")
         return False
 
 def migrar_dados_json_para_sqlite():
@@ -677,23 +664,20 @@ def listar_backups(backup_dir='backups/'):
     if not os.path.exists(backup_dir):
         os.makedirs(backup_dir)
         
-    st.title("Monitoramento de Backups")
+    st.title("Gerenciamento de Backups")
     
-    # Calcular estatísticas de armazenamento
-    total_space = 1024 * 1024 * 1024  # 1GB em bytes
+    # Lista e organiza backups
     backups = []
-    used_space = 0
-    
-    # Coletar informações dos backups
     for arquivo in os.listdir(backup_dir):
         if arquivo.startswith('backup_') and (arquivo.endswith('.zip') or arquivo.endswith('.gz')):
             caminho_arquivo = os.path.join(backup_dir, arquivo)
             tamanho = os.path.getsize(caminho_arquivo)
-            used_space += tamanho
             data_criacao = datetime.fromtimestamp(os.path.getctime(caminho_arquivo))
+            
+            # Identifica se é backup automático ou manual
             tipo = 'AUTOMÁTICO' if 'auto' in arquivo.lower() else 'MANUAL'
             
-            # Formatar tamanho
+            # Formata o tamanho do arquivo
             if tamanho < 1024:
                 tamanho_fmt = f"{tamanho} B"
             elif tamanho < 1024**2:
@@ -702,87 +686,69 @@ def listar_backups(backup_dir='backups/'):
                 tamanho_fmt = f"{tamanho/1024**2:.1f} MB"
             
             backups.append({
-                'data': data_criacao,
-                'data_fmt': data_criacao.strftime('%d/%m/%Y'),
-                'hora': data_criacao.strftime('%H:%M:%S'),
-                'tipo': tipo,
-                'tamanho': tamanho_fmt,
-                'arquivo': arquivo,
-                'caminho': caminho_arquivo
+                'Data': data_criacao.strftime('%d/%m/%Y'),
+                'Hora': data_criacao.strftime('%H:%M:%S'),
+                'Tipo': tipo,
+                'Tamanho': tamanho_fmt,
+                'Arquivo': arquivo,
+                'Caminho': caminho_arquivo
             })
     
-    # Ordenar backups por data mais recente
-    backups.sort(key=lambda x: x['data'], reverse=True)
-    backups = backups[:20]  # Limitar a 20 backups mais recentes
-    
-    # Exibir métricas de armazenamento
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("💾 Espaço Total", f"{total_space/1024/1024:.1f} MB")
-    with col2:
-        st.metric("📊 Espaço Utilizado", f"{used_space/1024/1024:.1f} MB")
-    with col3:
-        st.metric("✨ Espaço Livre", f"{(total_space-used_space)/1024/1024:.1f} MB")
-    
-    # Botão para limpar backups antigos
-    col1, col2 = st.columns([3,1])
-    with col2:
-        dias_manter = st.number_input("Dias para manter backups", min_value=1, value=7)
-        if st.button("🗑️ Limpar Backups Antigos"):
-            limpar_backups_antigos(backup_dir, dias_manter)
-            st.success(f"Backups mais antigos que {dias_manter} dias foram removidos!")
-            st.rerun()
-    
-    # Exibir lista de backups
-    st.markdown("### 📁 Backups Disponíveis")
-    
-    for backup in backups:
-        with st.container():
-            col1, col2, col3, col4 = st.columns([2,2,1,1])
-            
+    if backups:
+        # Cria DataFrame e ordena por data/hora mais recente
+        df = pd.DataFrame(backups)
+        df = df.sort_values(by=['Data', 'Hora'], ascending=[False, False])
+        
+        # Configura a exibição do DataFrame
+        st.dataframe(
+            df,
+            column_config={
+                "Data": st.column_config.TextColumn(
+                    "Data",
+                    width="small",
+                    help="Data de criação do backup"
+                ),
+                "Hora": st.column_config.TextColumn(
+                    "Hora",
+                    width="small"
+                ),
+                "Tipo": st.column_config.TextColumn(
+                    "Tipo",
+                    width="medium"
+                ),
+                "Tamanho": st.column_config.TextColumn(
+                    "Tamanho",
+                    width="small"
+                ),
+                "Arquivo": "Nome do Arquivo",
+                "Caminho": None  # Oculta a coluna do caminho
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+        
+        # Adiciona botões de ação para cada backup
+        for idx, backup in df.iterrows():
+            col1, col2 = st.columns([1, 4])
             with col1:
-                st.markdown(f"""
-                    <div style='padding: 10px; background-color: {'#E3F2FD' if backup['tipo'] == 'AUTOMÁTICO' else '#FFF3E0'}; 
-                    border-radius: 5px; margin: 5px 0;'>
-                        <span style='font-weight: bold; color: {'#1976D2' if backup['tipo'] == 'AUTOMÁTICO' else '#F57C00'};'>
-                            {backup['tipo']}
-                        </span>
-                    </div>
-                """, unsafe_allow_html=True)
-            
+                with open(backup['Caminho'], 'rb') as file:
+                    st.download_button(
+                        "📥 Download",
+                        file,
+                        file_name=backup['Arquivo'],
+                        mime="application/octet-stream",
+                        key=f"download_{idx}"
+                    )
             with col2:
-                st.markdown(f"""
-                    <div style='padding: 10px; background-color: white; border-radius: 5px; margin: 5px 0;'>
-                        📅 {backup['data_fmt']} - ⏰ {backup['hora']}
-                    </div>
-                """, unsafe_allow_html=True)
-            
-            with col3:
-                st.markdown(f"""
-                    <div style='padding: 10px; background-color: white; border-radius: 5px; margin: 5px 0;'>
-                        💾 {backup['tamanho']}
-                    </div>
-                """, unsafe_allow_html=True)
-            
-            with col4:
-                col4_1, col4_2 = st.columns(2)
-                with col4_1:
-                    with open(backup['caminho'], 'rb') as file:
-                        st.download_button(
-                            "📥",
-                            file,
-                            file_name=backup['arquivo'],
-                            mime="application/octet-stream",
-                            key=f"download_{backup['arquivo']}"
-                        )
-                with col4_2:
-                    if st.button("🗑️", key=f"delete_{backup['arquivo']}"):
-                        try:
-                            os.remove(backup['caminho'])
-                            st.success("Backup removido com sucesso!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Erro ao remover backup: {str(e)}")
+                if st.button("🗑️ Excluir", key=f"delete_{idx}"):
+                    try:
+                        os.remove(backup['Caminho'])
+                        st.success("Backup removido com sucesso!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erro ao remover backup: {str(e)}")
+    else:
+        st.info("Nenhum backup encontrado.")
 
 def restaurar_backup():
     try:
@@ -1014,8 +980,7 @@ def tela_login():
         if usuario in st.session_state.usuarios:
             user_data = st.session_state.usuarios[usuario]
             
-            # Simplifica a verificação de primeiro acesso
-            if user_data.get('senha') is None:
+            if user_data.get('senha') is None or user_data.get('primeiro_acesso', True):
                 st.markdown("### 😊 Primeiro Acesso - Configure sua senha")
                 with st.form("primeiro_acesso_form"):
                     nova_senha = st.text_input("Nova Senha", type="password", 
@@ -1031,13 +996,9 @@ def tela_login():
                             st.error("As senhas não coincidem")
                             return
                             
-                        senha_hash = gerar_hash_senha(nova_senha)
-                        st.session_state.usuarios[usuario].update({
-                            'senha': senha_hash,
-                            'primeiro_acesso': False,
-                            'data_ultimo_acesso': get_data_hora_brasil()
-                        })
-                        
+                        st.session_state.usuarios[usuario]['senha'] = gerar_hash_senha(nova_senha)
+                        st.session_state.usuarios[usuario]['primeiro_acesso'] = False
+                        st.session_state.usuarios[usuario]['data_ultimo_acesso'] = get_data_hora_brasil()
                         if salvar_usuarios():
                             st.success("Senha cadastrada com sucesso!")
                             time.sleep(1)
@@ -1056,23 +1017,28 @@ def tela_login():
                         senha_digitada_hash = gerar_hash_senha(senha)
                         senha_armazenada = user_data['senha']
                         
-                        # Verifica a senha usando apenas o hash
-                        if senha_digitada_hash != senha_armazenada:
-                            st.error("Senha incorreta")
-                            return
+                        # Se a senha armazenada não for hash, compara diretamente
+                        if len(senha_armazenada) != 64:  # Tamanho do hash SHA-256
+                            if senha != senha_armazenada:
+                                st.error("Senha incorreta")
+                                return
+                            # Atualiza para o formato hash
+                            st.session_state.usuarios[usuario]['senha'] = senha_digitada_hash
+                            salvar_usuarios()
+                        else:
+                            # Compara os hashes
+                            if senha_digitada_hash != senha_armazenada:
+                                st.error("Senha incorreta")
+                                return
                             
-                        # Atualiza a sessão e dados do usuário
-                        st.session_state.update({
-                            'usuario': usuario,
-                            'perfil': user_data['perfil']
-                        })
-                        
+                        st.session_state['usuario'] = usuario
+                        st.session_state['perfil'] = user_data['perfil']
                         st.session_state.usuarios[usuario]['data_ultimo_acesso'] = get_data_hora_brasil()
                         salvar_usuarios()
-                        
                         st.success(f"Bem-vindo, {usuario}!")
                         time.sleep(1)
                         st.rerun()
+
 
 def menu_lateral():
     with st.sidebar:
