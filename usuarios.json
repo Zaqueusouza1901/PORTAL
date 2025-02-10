@@ -44,18 +44,6 @@
             "configuracoes"
         ]
     },
-    "CAIO KELLER": {
-        "senha": null,
-        "perfil": "vendedor",
-        "email": "caio@jetfrio.com.br",
-        "ativo": true,
-        "primeiro_acesso": true,
-        "permissoes": [
-            "dashboard",
-            "requisicoes",
-            "configuracoes"
-        ]
-    },
     "CAROLINE VICTORIO": {
         "senha": null,
         "perfil": "vendedor",
@@ -108,18 +96,6 @@
         "senha": null,
         "perfil": "vendedor",
         "email": "sergio.souza@jetfrio.com.br",
-        "ativo": true,
-        "primeiro_acesso": true,
-        "permissoes": [
-            "dashboard",
-            "requisicoes",
-            "configuracoes"
-        ]
-    },
-    "FABIO POPPI": {
-        "senha": null,
-        "perfil": "vendedor",
-        "email": "fabiopopi@jetfrio.com.br",
         "ativo": true,
         "primeiro_acesso": true,
         "permissoes": [
@@ -252,6 +228,30 @@
         "senha": null,
         "perfil": "vendedor",
         "email": "marcio.moreira@jetfrio.com.br",
+        "ativo": true,
+        "primeiro_acesso": true,
+        "permissoes": [
+            "dashboard",
+            "requisicoes",
+            "configuracoes"
+        ]
+    },
+    "ELIZA DA HORA SILVA": {
+        "senha": null,
+        "perfil": "vendedor",
+        "email": "eliza@jetfrio.com.br",
+        "ativo": true,
+        "primeiro_acesso": true,
+        "permissoes": [
+            "dashboard",
+            "requisicoes",
+            "configuracoes"
+        ]
+    },
+    "BEATRIZ BRITO": {
+        "senha": null,
+        "perfil": "vendedor",
+        "email": "beatriz@jetfrio.com.br",
         "ativo": true,
         "primeiro_acesso": true,
         "permissoes": [
