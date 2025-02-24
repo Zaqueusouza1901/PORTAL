@@ -1,0 +1,234 @@
+[
+    {
+        "numero": 5004,
+        "cliente": "DANFOSS",
+        "vendedor": "ZAQUEU SOUZA",
+        "data_hora": "14:28:38 - 13/01/2025",
+        "status": "FINALIZADA",
+        "items": [
+            {
+                "item": 1,
+                "codigo": "WDEWDEWDEW",
+                "cod_fabricante": "DANFOSS",
+                "descricao": "MTZ50-3VI COMPRESSOR DANFOSS",
+                "marca": "DANFOSS",
+                "quantidade": 1.0,
+                "status": "ABERTA",
+                "custo_unit": 3000.0,
+                "markup": 60.0,
+                "prazo_entrega": "30 DIAS",
+                "venda_unit": 4800.0,
+                "venda_total": 4800.0,
+                "salvo": true
+            }
+        ],
+        "comprador_responsavel": "ZAQUEU SOUZA",
+        "data_hora_aceite": "14:32:01 - 13/01/2025",
+        "observacao_geral": "TESTE",
+        "data_hora_resposta": "14:33:38 - 13/01/2025"
+    },
+    {
+        "numero": 5005,
+        "cliente": "TESTE",
+        "vendedor": "ZAQUEU SOUZA",
+        "data_hora": "15:22:57 - 13/01/2025",
+        "status": "FINALIZADA",
+        "items": [
+            {
+                "item": 1,
+                "codigo": "EFEWF",
+                "cod_fabricante": "EWFEWF",
+                "descricao": "EWFEWF",
+                "marca": "EFWWEF",
+                "quantidade": 222.0,
+                "status": "ABERTA",
+                "custo_unit": 150.0,
+                "markup": 100.0,
+                "prazo_entrega": "30 dias",
+                "venda_unit": 300.0,
+                "venda_total": 66600.0,
+                "salvo": true
+            }
+        ],
+        "comprador_responsavel": "ZAQUEU SOUZA",
+        "data_hora_aceite": "15:23:01 - 13/01/2025",
+        "data_hora_resposta": "15:23:20 - 13/01/2025"
+    },
+    {
+        "numero": 5050,
+        "cliente": "MARCIO MOREIRA",
+        "vendedor": "ZAQUEU SOUZA",
+        "data_hora": "16:01:00 - 13/01/2025",
+        "status": "FINALIZADA",
+        "items": [
+            {
+                "item": 1,
+                "codigo": "EWFWEF",
+                "cod_fabricante": "EWFWEF",
+                "descricao": "WEFWEF",
+                "marca": "EWFEWF",
+                "quantidade": 3.0,
+                "status": "ABERTA",
+                "custo_unit": 150.0,
+                "markup": 60.0,
+                "prazo_entrega": "30 DIASS",
+                "venda_unit": 240.0,
+                "venda_total": 720.0,
+                "salvo": true
+            }
+        ],
+        "comprador_responsavel": "ZAQUEU SOUZA",
+        "data_hora_aceite": "10:24:40 - 14/01/2025",
+        "observacao_geral": "TESTANDO 123",
+        "data_hora_resposta": "10:57:03 - 14/01/2025"
+    },
+    {
+        "numero": 5061,
+        "cliente": "ABCDARIO DA XUXA",
+        "vendedor": "ZAQUEU SOUZA",
+        "data_hora": "11:01:41 - 14/01/2025",
+        "status": "FINALIZADA",
+        "items": [
+            {
+                "item": 1,
+                "codigo": "1240",
+                "cod_fabricante": "MUFLA",
+                "descricao": "MUFLA DE COBRE 2.1/8",
+                "marca": "1BDSS",
+                "quantidade": 2.0,
+                "status": "ABERTA",
+                "custo_unit": 100.0,
+                "markup": 60.0,
+                "prazo_entrega": "30 DIAS",
+                "venda_unit": 160.0,
+                "venda_total": 320.0,
+                "salvo": true
+            },
+            {
+                "item": 2,
+                "codigo": "25456",
+                "cod_fabricante": "MUFLA 2",
+                "descricao": "MUFLA DE COBRE 3.1/8",
+                "marca": "EFEFE",
+                "quantidade": 3.5,
+                "status": "ABERTA",
+                "custo_unit": 250.0,
+                "markup": 100.0,
+                "prazo_entrega": "1 DOIA",
+                "venda_unit": 500.0,
+                "venda_total": 1750.0,
+                "salvo": true
+            }
+        ],
+        "comprador_responsavel": "ZAQUEU SOUZA",
+        "data_hora_aceite": "11:01:45 - 14/01/2025",
+        "observacao_geral": "TESTE",
+        "data_hora_resposta": "11:02:44 - 14/01/2025"
+    },
+    {
+        "numero": 5062,
+        "cliente": "EFWEFWEF",
+        "vendedor": "ZAQUEU SOUZA",
+        "data_hora": "11:03:36 - 14/01/2025",
+        "status": "FINALIZADA",
+        "items": [
+            {
+                "item": 1,
+                "codigo": "EFWF",
+                "cod_fabricante": "WEFFW",
+                "descricao": "EWFWEFFEWF",
+                "marca": "EEEEE",
+                "quantidade": 22.0,
+                "status": "ABERTA",
+                "custo_unit": 250.0,
+                "markup": 60.0,
+                "prazo_entrega": "10",
+                "venda_unit": 400.0,
+                "venda_total": 8800.0,
+                "salvo": true
+            }
+        ],
+        "comprador_responsavel": "ZAQUEU SOUZA",
+        "data_hora_aceite": "11:03:39 - 14/01/2025",
+        "data_hora_resposta": "11:03:50 - 14/01/2025"
+    },
+    {
+        "numero": 5063,
+        "cliente": "MAURO SÉRGIO",
+        "vendedor": "ZAQUEU SOUZA",
+        "data_hora": "11:14:03 - 14/01/2025",
+        "status": "EM ANDAMENTO",
+        "items": [
+            {
+                "item": 1,
+                "codigo": "12345",
+                "cod_fabricante": "",
+                "descricao": "COMPRESSOR",
+                "marca": "",
+                "quantidade": 1.0,
+                "status": "ABERTA"
+            }
+        ],
+        "comprador_responsavel": "ZAQUEU SOUZA",
+        "data_hora_aceite": "11:25:28 - 14/01/2025"
+    },
+    {
+        "numero": 5064,
+        "cliente": "ABCDF",
+        "vendedor": "ZAQUEU SOUZA",
+        "data_hora": "11:29:31 - 14/01/2025",
+        "status": "EM ANDAMENTO",
+        "items": [
+            {
+                "item": 1,
+                "codigo": "2233",
+                "cod_fabricante": "EDFWEF",
+                "descricao": "2232",
+                "marca": "232",
+                "quantidade": 2.0,
+                "status": "ABERTA"
+            }
+        ],
+        "observacoes_vendedor": "ABDC",
+        "comprador_responsavel": "ZAQUEU SOUZA",
+        "data_hora_aceite": "11:30:40 - 14/01/2025"
+    },
+    {
+        "numero": 5068,
+        "cliente": "DANFOSS",
+        "vendedor": "ZAQUEU SOUZA",
+        "data_hora": "13:51:45 - 14/01/2025",
+        "status": "ABERTA",
+        "items": [
+            {
+                "item": 1,
+                "codigo": "13213",
+                "cod_fabricante": "RREG",
+                "descricao": "COMPRESSOR DANFOSS MTZ50-3VI",
+                "marca": "121",
+                "quantidade": 1.0,
+                "status": "ABERTA"
+            }
+        ],
+        "observacoes_vendedor": ""
+    },
+    {
+        "numero": 5069,
+        "cliente": "WW",
+        "vendedor": "ZAQUEU SOUZA",
+        "data_hora": "13:52:15 - 14/01/2025",
+        "status": "ABERTA",
+        "items": [
+            {
+                "item": 1,
+                "codigo": "WEDD",
+                "cod_fabricante": "EFEW",
+                "descricao": "EFWF",
+                "marca": "EFEW",
+                "quantidade": 1.0,
+                "status": "ABERTA"
+            }
+        ],
+        "observacoes_vendedor": "NADA"
+    }
+]

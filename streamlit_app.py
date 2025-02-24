@@ -1,420 +1,493 @@
 import streamlit as st
-import pandas as pd
-import sqlite3
-import time
-from datetime import datetime
-import pytz
-import json
 import os
+import firebase_admin
+from firebase_admin import credentials, auth, db
+import pandas as pd
+import time
+import json
 import smtplib
+import logging
+import shutil
+import glob
+import pytz
+import gzip
+from streamlit import session_state as state
+from firebase_admin import db, auth
+from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import plotly.graph_objects as go
+from google.cloud import firestore
+from google.oauth2 import service_account
+import streamlit_autorefresh
 from streamlit_autorefresh import st_autorefresh
 
-# Configuração da página
+# Configuração da página (DEVE SER A PRIMEIRA CHAMADA DO STREAMLIT)
 st.set_page_config(
     page_title="PORTAL - JETFRIO",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Inicialização do banco de dados SQLite
-def inicializar_banco():
-    conn = sqlite3.connect('banco_jetfrio.db')
-    cursor = conn.cursor()
-    
-    # Criar tabela de requisições
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS requisicoes (
-            numero INTEGER PRIMARY KEY,
-            cliente TEXT,
-            vendedor TEXT,
-            data_hora TEXT,
-            status TEXT,
-            comprador_responsavel TEXT,
-            data_hora_resposta TEXT,
-            observacao_geral TEXT,
-            dados JSON
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
-
-# Inicializa o banco de dados ao iniciar a aplicação
-inicializar_banco()
-
-def salvar_requisicao_db(requisicao):
-    conn = sqlite3.connect('banco_jetfrio.db')
-    cursor = conn.cursor()
-    
+# Inicialização do Firebase
+if not firebase_admin._apps:
     try:
-        cursor.execute('''
-            INSERT OR REPLACE INTO requisicoes 
-            (numero, cliente, vendedor, data_hora, status, comprador_responsavel, 
-             data_hora_resposta, observacao_geral, dados)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            requisicao['numero'],
-            requisicao['cliente'],
-            requisicao['vendedor'],
-            requisicao['data_hora'],
-            requisicao['status'],
-            requisicao.get('comprador_responsavel'),
-            requisicao.get('data_hora_resposta'),
-            requisicao.get('observacao_geral'),
-            json.dumps(requisicao)
-        ))
+        # Carrega as credenciais do st.secrets e converte para string JSON
+        cred_dict = dict(st.secrets["FIREBASE_CREDENTIALS"])
+        cred = credentials.Certificate(cred_dict)
+        firebase_admin.initialize_app(cred, {
+            'databaseURL': 'https://portal-fd465-default-rtdb.firebaseio.com/'
+        })
+        print("Firebase inicializado com st.secrets!")
+    except Exception as e:
+        st.error(f"Erro ao inicializar o Firebase com st.secrets: {e}")
+        # Se falhar, tenta carregar de um arquivo (útil para desenvolvimento local)
+        try:
+            # Caminho absoluto para o arquivo JSON
+            caminho_arquivo_json = "portal-fd465-firebase-adminsdk-fbsvc-490ec0697a.json"
+            cred = credentials.Certificate(caminho_arquivo_json)
+            firebase_admin.initialize_app(cred, {
+                'databaseURL': 'https://portal-fd465-default-rtdb.firebaseio.com/'
+            })
+            print("Firebase inicializado com arquivo JSON local!")
+        except FileNotFoundError:
+            st.error("Arquivo JSON de credenciais não encontrado.")
+        except Exception as e:
+            st.error(f"Erro ao inicializar o Firebase com arquivo JSON local: {e}")
+
+db = firebase_admin.db
+
+def criar_usuario_admin():
+    try:
+        # Referência ao nó 'usuarios' no Firebase
+        usuarios_ref = db.reference('usuarios')
         
-        conn.commit()
-        return True
-    except Exception as e:
-        conn.rollback()
-        st.error(f"Erro ao salvar requisição: {str(e)}")
-        return False
-    finally:
-        conn.close()
-
-def carregar_requisicoes_db():
-    conn = sqlite3.connect('banco_jetfrio.db')
-    cursor = conn.cursor()
-    
-    try:
-        cursor.execute('SELECT dados FROM requisicoes')
-        requisicoes = []
-        for row in cursor.fetchall():
-            if row[0]:  # Verifica se dados não é None
-                requisicao = json.loads(row[0])
-                requisicoes.append(requisicao)
-        return requisicoes
-    except Exception as e:
-        st.error(f"Erro ao carregar requisições: {str(e)}")
-        return []
-    finally:
-        conn.close()
-
-def salvar_requisicao_db(requisicao):
-    conn = sqlite3.connect('banco_jetfrio.db')
-    cursor = conn.cursor()
-    
-    try:
-        cursor.execute('''
-            INSERT OR REPLACE INTO requisicoes 
-            (numero, cliente, vendedor, data_hora, status, comprador_responsavel, 
-             data_hora_resposta, observacao_geral, dados)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            requisicao['numero'],
-            requisicao['cliente'],
-            requisicao['vendedor'],
-            requisicao['data_hora'],
-            requisicao['status'],
-            requisicao.get('comprador_responsavel'),
-            requisicao.get('data_hora_resposta'),
-            requisicao.get('observacao_geral'),
-            json.dumps(requisicao)
-        ))
+        # Verificar se o usuário administrador já existe
+        usuario_admin = None
+        todos_usuarios = usuarios_ref.get()
         
-        conn.commit()
-        return True
+        if todos_usuarios:
+            for uid, dados_usuario in todos_usuarios.items():
+                if dados_usuario.get('nome') == "ZAQUEU SOUZA":
+                    usuario_admin = dados_usuario
+                    break
+        
+        # Se o usuário administrador não existir, cadastrá-lo
+        if not usuario_admin:
+            user_id = "admin"  # Um ID fixo para o administrador
+            novo_usuario_data = {
+                'nome': "ZAQUEU SOUZA",
+                'email': "Importacao@jetfrio.com.br",
+                'senha': "Za@031162",
+                'perfil': "administrador",
+                'ativo': True,
+                'data_criacao': get_data_hora_brasil()
+            }
+            usuarios_ref.child(user_id).set(novo_usuario_data)
+            print("Usuário administrador cadastrado com sucesso!")
     except Exception as e:
-        conn.rollback()
-        st.error(f"Erro ao salvar requisição: {str(e)}")
-        return False
-    finally:
-        conn.close()
+        print(f"Erro ao criar usuário administrador: {str(e)}")
 
-def init_notification_js():
-    st.components.v1.html("""
-        <script>
-        if (!window.Notification) {
-            console.log('Este navegador não suporta notificações');
-        } else {
-            if (Notification.permission !== 'granted' && Notification.permission !== 'denied') {
-                Notification.requestPermission().then(function(permission) {
-                    if (permission === 'granted') {
-                        new Notification('Notificações Ativadas', {
-                            body: 'Você receberá notificações sobre suas requisições',
-                            icon: '/favicon.ico'
-                        });
-                    }
-                });
-            }
-        }
+def mostrar_espaco_armazenamento():
+    
+    # Calcula o espaço usado pelos backups
+    backup_files = glob.glob('backup/*')
+    espaco_usado = sum(os.path.getsize(f) for f in backup_files) / (1024 * 1024)  # Converte para MB
+    
+    # Define o espaço total (exemplo: 1000 MB)
+    espaco_total = 1000  # MB
+    espaco_disponivel = espaco_total - espaco_usado
+    
+    # Cria o gráfico de rosca
+    fig = go.Figure(data=[go.Pie(
+        labels=['Disponível', 'Usado'],
+        values=[espaco_disponivel, espaco_usado],
+        hole=.7,
+        marker_colors=['#66b3ff', '#ff9999'],
+        textinfo='percent',
+        textfont_size=20,
+        showlegend=True
+    )])
+    
+    # Atualiza o layout
+    fig.update_layout(
+        title=dict(
+            text="Espaço de Armazenamento",
+            y=0.95,
+            x=0.5,
+            xanchor='center',
+            yanchor='top',
+            font=dict(size=16)
+        ),
+        annotations=[dict(
+            text=f'{espaco_usado:.1f}MB<br>de {espaco_total}MB',
+            x=0.5,
+            y=0.5,
+            font_size=14,
+            showarrow=False
+        )],
+        height=300,
+        margin=dict(t=50, l=0, r=0, b=0),
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)'
+    )
+    
+EMAIL_CONFIG = {
+    'SMTP_SERVER': 'smtp-mail.outlook.com',
+    'SMTP_PORT': 587,
+    'SMTP_ENCRYPTION': 'STARTTLS',
+    'EMAIL': 'alerta@jetfrio.com.br',
+    'PASSWORD': 'Jet@2007'
+}
 
-        window.createNotification = function(title, body) {
-            if (Notification.permission === 'granted') {
-                new Notification(title, {
-                    body: body,
-                    icon: '/favicon.ico',
-                    requireInteraction: true
-                });
-            }
-        }
-        </script>
-    """, height=0)
-
-def notify(title, message):
-    if st.session_state.get('notificacoes_ativas', True):
-        js = f"""
-        <script>
-        if (typeof window.createNotification === 'function') {{
-            window.createNotification("{title}", "{message}");
-        }}
-        </script>
+def enviar_email_requisicao(requisicao, tipo_notificacao):
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = EMAIL_CONFIG['EMAIL']
+        msg['Subject'] = f"SUA REQUISIÇÃO Nº{requisicao['numero']} FOI {tipo_notificacao.upper()}"
+        
+        # Define destinatários
+        vendedor_email = st.session_state.usuarios[requisicao['vendedor']]['email']
+        comprador_email = st.session_state.usuarios.get(requisicao.get('comprador_responsavel', ''), {}).get('email', '')
+        
+        msg['To'] = vendedor_email
+        if comprador_email:
+            msg['Cc'] = comprador_email
+        
+        # Cria tabela HTML dos itens
+        html = f"""
+        <html>
+            <body>
+                <h2>Requisição #{requisicao['numero']}</h2>
+                <p><strong>Cliente:</strong> {requisicao['cliente']}</p>
+                <p><strong>Status:</strong> {requisicao['status']}</p>
+                
+                <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 10px 0;">
+                    <p><strong>Criado por:</strong> {requisicao['vendedor']}</p>
+                    <p><strong>Data/Hora Criação:</strong> {requisicao['data_hora']}</p>
+                    <p><strong>Respondido por:</strong> {requisicao.get('comprador_responsavel', '-')}</p>
+                    <p><strong>Data/Hora Resposta:</strong> {requisicao.get('data_hora_resposta', '-')}</p>
+                </div>... <table border="1" style="border-collapse: collapse; width: 100%;">
+                    <tr>... <th>Código</th>
+                        <th>Descrição</th>
+                        <th>Marca</th>
+                        <th>Qtd</th>
+                        <th>Valor Unit.</th>
+                        <th>Total</th>
+                        <th>Prazo</th>
+                    </tr>
         """
-        st.components.v1.html(js, height=0)
+        
+        for item in requisicao['items']:
+            html += f"""
+                <tr>
+                    <td>{item['item']}</td>
+                    <td>{item['codigo']}</td>
+                    <td>{item['descricao']}</td>
+                    <td>{item['marca']}</td>
+                    <td>{item['quantidade']}</td>
+                    <td>R$ {item.get('venda_unit', 0):.2f}</td>
+                    <td>R$ {item.get('venda_unit', 0) * item['quantidade']:.2f}</td>
+                    <td>{item.get('prazo_entrega', '-')}</td>
+                </tr>
+            """
+        
+        html += """
+                </table>
+        """
 
-# Estilo personalizado com adaptação ao tema
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
-* {
-    font-family: 'Inter', sans-serif;
-}
-.stApp {
-    transition: all 0.3s ease-in-out;
-}
-.main {
-    padding: 2rem;
-    background-color: var(--background-color);
-    border-radius: 8px;
-    margin: 1rem;
-}
-.sidebar {
-    background-color: var(--background-color);
-    padding: 2rem 1rem;
-}
-h1 {
-    color: #2D2C74;
-    font-size: 1.8rem;
-    font-weight: 600;
-    margin-bottom: 1.5rem;
-}
-.stButton > button {
-    background-color: #2D2C74;
-    color: white;
-    border-radius: 4px;
-    padding: 0.75rem 1rem;
-    font-weight: 500;
-}
-.stButton > button:hover {
-    background-color: #1B81C5;
-}
-.metric-card {
-    background-color: var(--background-color);
-    padding: 1.5rem;
-    border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
+        # Adiciona observações se existirem
+        if requisicao.get('observacao_geral'):
+            html += f"""
+                <div style="margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-left: 4px solid #2D2C74;">
+                    <h3 style="margin-top: 0; color: #2D2C74;">Observações do Comprador:</h3>
+                    <p style="margin-bottom: 0;">{requisicao['observacao_geral']}</p>
+                </div>
+            """
 
-/* Adaptação para inputs */
-.stTextInput input,
-.stPasswordInput input {
-    color: var(--text-color) !important;
-    background-color: var(--background-color) !important;
-    border-color: var(--secondary-background-color) !important;
-}
+        # Adiciona justificativa de recusa se existir
+        if tipo_notificacao.upper() == 'RECUSADA' and requisicao.get('justificativa_recusa'):
+            html += f"""
+                <div style="margin-top: 20px; padding: 15px; background-color: #ffebee; border-left: 4px solid #c62828;">
+                    <h3 style="margin-top: 0; color: #c62828;">Justificativa da Recusa:</h3>
+                    <p style="margin-bottom: 0;">{requisicao['justificativa_recusa']}</p>
+                </div>
+            """
 
-/* Adaptação para textos */
-.stMarkdown, .stText {
-    color: var(--text-color) !important;
-}
-
-/* Adaptação para containers */
-[data-testid="stForm"] {
-    background-color: var(--background-color) !important;
-    border: 1px solid var(--secondary-background-color) !important;
-}
-
-/* Adaptação para sidebar */
-section[data-testid="stSidebar"] {
-    background-color: var(--background-color) !important;
-}
-
-/* Adaptação para cards */
-div.element-container {
-    color: var(--text-color) !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-def solicitar_permissao_notificacao():
-    st.markdown("""
-    <script>
-    function solicitarPermissao() {
-        if (!("Notification" in window)) {
-            alert("Este navegador não suporta notificações na área de trabalho");
-        } else if (Notification.permission === "granted") {
-            console.log("Permissão para notificações já concedida");
-        } else if (Notification.permission !== "denied") {
-            Notification.requestPermission().then(function (permission) {
-                if (permission === "granted") {
-                    console.log("Permissão para notificações concedida");
-                }
-            });
-        }
-    }
-    solicitarPermissao();
-    </script>
-    """, unsafe_allow_html=True)
-
-def enviar_notificacao(titulo, corpo, numero_requisicao):
-    st.markdown(f"""
-    <script>
-    function enviarNotificacao() {{
-        if (Notification.permission === "granted") {{
-            var notification = new Notification("{titulo}", {{
-                body: "{corpo}",
-                icon: "/favicon.ico",
-                tag: "requisicao-{numero_requisicao}",
-                requireInteraction: true
-            }});
-            
-            notification.onclick = function() {{
-                window.focus();
-                const element = document.getElementById("requisicao-{numero_requisicao}");
-                if (element) {{
-                    element.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
-                    element.style.animation = 'highlight 2s';
-                }}
-                notification.close();
-            }};
-        }}
-    }}
-    enviarNotificacao();
-    </script>
-    """, unsafe_allow_html=True)
-
-def get_permissoes_perfil(perfil):
-    permissoes_padrao = {
-        'vendedor': ['dashboard', 'requisicoes', 'configuracoes'],
-        'comprador': ['dashboard', 'requisicoes', 'cotacoes', 'importacao', 'configuracoes'],
-        'administrador': ['dashboard', 'requisicoes', 'cotacoes', 'importacao', 'configuracoes', 'editar_usuarios', 'excluir_usuarios', 'editar_perfis']
-    }
-    try:
-        with open('perfis.json', 'r', encoding='utf-8') as f:
-            perfis = json.load(f)
-            return perfis.get(perfil, permissoes_padrao.get(perfil, []))
-    except FileNotFoundError:
-        return permissoes_padrao.get(perfil, [])
+        html += """
+            </body>
+        </html>
+        """
+        
+        msg.attach(MIMEText(html, 'html'))
+        
+        # Envia o email
+        with smtplib.SMTP(EMAIL_CONFIG['SMTP_SERVER'], EMAIL_CONFIG['SMTP_PORT']) as server:
+            server.starttls()
+            server.login(EMAIL_CONFIG['EMAIL'], EMAIL_CONFIG['PASSWORD'])
+            destinatarios = [vendedor_email]
+            if comprador_email:
+                destinatarios.append(comprador_email)
+            server.send_message(msg)
+        
+        return True
     except Exception as e:
-        st.error(f"Erro ao carregar permissões: {str(e)}")
-        return permissoes_padrao.get(perfil, [])
+        st.error(f"Erro ao enviar email: {str(e)}")
+        return False
 
 def save_perfis_permissoes(perfil, permissoes):
     try:
-        try:
-            with open('perfis.json', 'r', encoding='utf-8') as f:
-                perfis = json.load(f)
-        except FileNotFoundError:
-            perfis = {}
-        except json.JSONDecodeError:
-            perfis = {}
-        
-        perfis[perfil] = permissoes
-        
-        with open('perfis.json', 'w', encoding='utf-8') as f:
-            json.dump(perfis, f, ensure_ascii=False, indent=4)
-            
+        ref = db.child(perfil).set(permissoes)
         return True
-    
     except Exception as e:
         st.error(f"Erro ao salvar permissões: {str(e)}")
         return False
 
-def carregar_usuarios():
-    usuario_padrao = {
-        'ZAQUEU SOUZA': {
-            'senha': None,
-            'perfil': 'administrador',
-            'email': 'zaqueu@jetfrio.com.br',
-            'ativo': True,
-            'primeiro_acesso': True,
-            'permissoes': get_permissoes_perfil('administrador')
-        }
-    }
-    
+def importar_dados_antigos(caminho_arquivo):
     try:
-        # Se o arquivo não existir, cria com usuário padrão
-        if not os.path.exists('usuarios.json'):
-            with open('usuarios.json', 'w', encoding='utf-8') as f:
-                json.dump(usuario_padrao, f, ensure_ascii=False, indent=4)
-            print("Arquivo usuarios.json criado com usuário padrão")
-            return usuario_padrao
+        # Carregar dados do JSON
+        with open(caminho_arquivo, 'r', encoding='utf-8') as file:
+            requisicoes_antigas = json.load(file)
 
-        # Lê o arquivo existente
-        with open('usuarios.json', 'r', encoding='utf-8') as f:
-            usuarios = json.load(f)
-            if not usuarios:
-                print("Arquivo vazio, retornando usuário padrão")
-                return usuario_padrao
-                
-            # Garante que o usuário administrador existe
-            if 'ZAQUEU SOUZA' not in usuarios:
-                usuarios['ZAQUEU SOUZA'] = usuario_padrao['ZAQUEU SOUZA']
-                with open('usuarios.json', 'w', encoding='utf-8') as f:
-                    json.dump(usuarios, f, ensure_ascii=False, indent=4)
-            
-            return usuarios
-            
-    except Exception as e:
-        print(f"Erro ao carregar usuários: {str(e)}")
-        return usuario_padrao
+        # Referência para o nó 'requisicoes' no Firebase
+        ref = db.reference('/requisicoes')
 
-def salvar_usuarios():
-    arquivo_usuarios = 'usuarios.json'
-    try:
-        with open(arquivo_usuarios, 'w', encoding='utf-8') as f:
-            json.dump(st.session_state.usuarios, f, ensure_ascii=False, indent=4)
+        # Inserir dados formatados
+        for req in requisicoes_antigas:
+            numero_req = req.get('numero', '')  # Use 'numero' para corresponder à chave no JSON
+            
+            # Converter a string JSON de items para uma lista de dicionários
+            items_str = req.get('items', '[]')  # Obtém a string JSON ou usa '[]' como padrão
+            try:
+                items = json.loads(items_str)  # Converte a string para uma lista de dicionários
+            except json.JSONDecodeError:
+                st.error(f"Erro ao decodificar items da requisição {numero_req}. Verifique a formatação JSON.")
+                continue  # Pula para a próxima requisição em caso de erro
+
+            requisicao_data = {
+                'numero': numero_req,
+                'cliente': req.get('cliente'),
+                'vendedor': req.get('vendedor'),
+                'data_hora': req.get('data_hora'),
+                'status': req.get('status'),
+                'items': items,
+                'observacoes_vendedor': req.get('observacoes_vendedor', ''),  # Usar get para campos opcionais
+                'comprador_responsavel': req.get('comprador_responsavel', ''),
+                'data_hora_resposta': req.get('data_hora_resposta', ''),
+                'justificativa_recusa': req.get('justificativa_recusa', ''),
+                'observacao_geral': req.get('observacao_geral', '')
+            }
+            
+            ref.child(numero_req).set(requisicao_data)
+
+        st.success("Dados importados com sucesso para o Firebase!")
         return True
+    except FileNotFoundError:
+        st.error(f"Arquivo não encontrado: {caminho_arquivo}")
+        return False
     except Exception as e:
-        st.error(f"Erro ao salvar usuários: {str(e)}")
+        st.error(f"Erro na importação: {str(e)}")
         return False
 
-def salvar_requisicao_db():
-    for requisicao in st.session_state.requisicoes:
-        conn = sqlite3.connect('banco_jetfrio.db')
-        cursor = conn.cursor()
-        try:
-            cursor.execute('''
-                INSERT OR REPLACE INTO requisicoes 
-                (numero, cliente, vendedor, data_hora, status, comprador_responsavel, 
-                 data_hora_resposta, observacao_geral, dados)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                requisicao['numero'],
-                requisicao['cliente'],
-                requisicao['vendedor'],
-                requisicao['data_hora'],
-                requisicao['status'],
-                requisicao.get('comprador_responsavel'),
-                requisicao.get('data_hora_resposta'),
-                requisicao.get('observacao_geral'),
-                json.dumps(requisicao)
-            ))
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
-            st.error(f"Erro ao salvar requisição: {str(e)}")
-            return False
-        finally:
-            conn.close()
+def carregar_usuarios():
+    try:
+        ref = db.reference('/usuarios')
+        usuarios = ref.get()
+        if usuarios:
+            return usuarios  # Retorna um dicionário de usuários
+        else:
+            return {} # Retorna um dicionário vazio em vez de None
+    except Exception as e:
+        st.error(f"Erro ao carregar usuários: {str(e)}")
+        return {} # Retorna um dicionário vazio em caso de erro
+
+def salvar_usuario(usuario_id, usuario_data):
+  try:
+    ref = db.reference('/usuarios')
+    ref.child(usuario_id).set(usuario_data)
     return True
+  except Exception as e:
+    st.error(f"Erro ao salvar usuario: {str(e)}")
+    return False
+
+def migrar_dados_json_para_firebase():
+    try:
+        with open('requisicoes.json', 'r', encoding='utf-8') as f:
+            requisicoes_json = json.load(f)
+        
+        # Referência ao nó 'requisicoes' no Firebase
+        ref = db.reference('/requisicoes')
+        
+        for req in requisicoes_json:
+            req_data = {
+                'numero': req['REQUISIÇÃO'],
+                'cliente': req['CLIENTE'],
+                'vendedor': req['VENDEDOR'],
+                'data_hora': req['Data/Hora Criação:'],
+                'status': req['STATUS'],
+                'items': [{
+                    'codigo': req['CÓDIGO'],
+                    'descricao': req['DESCRIÇÃO'],
+                    'marca': req['MARCA'],
+                    'quantidade': req['QUANTIDADE'],
+                    'venda_unit': req[' R$ UNIT '].replace('R$ ', '').replace(',', '.').strip(),
+                    'prazo_entrega': req['PRAZO']
+                }],
+                'observacoes_vendedor': '',
+                'comprador_responsavel': req['COMPRADOR'],
+                'data_hora_resposta': req['Data/Hora Resposta:'],
+                'justificativa_recusa': '',
+                'observacao_geral': req['OBSERVAÇÕES DO COMPRADOR']
+            }
+            
+            # Usar o número da requisição como chave
+            ref.child(req['REQUISIÇÃO']).set(req_data)
+        
+        return True
+    except Exception as e:
+        print(f"Erro na migração para Firebase: {str(e)}")
+        return False
+    
+import json
 
 def carregar_requisicoes():
     try:
-        if os.path.exists('requisicoes.json'):
-            with open('requisicoes.json', 'r', encoding='utf-8') as f:
-                return json.load(f)
-        return []  # Retorna lista vazia se arquivo não existir
-    except json.JSONDecodeError as e:
-        # Arquivo existe mas está corrompido ou vazio
-        return []
+        ref = db.reference('/requisicoes')
+        requisicoes = ref.get()
+
+        if requisicoes:
+            lista_requisicoes = []
+            for numero, req_str in requisicoes.items():
+                try:
+                    req = json.loads(req_str) if isinstance(req_str, str) else req_str # Desserializa se for string
+                    lista_requisicoes.append(req)
+                except (TypeError, json.JSONDecodeError) as e:
+                    st.error(f"Erro ao decodificar requisição {numero}: {str(e)}")
+                    continue  # Pula para a próxima requisição em caso de erro
+
+            return lista_requisicoes
+        else:
+            return []
+
     except Exception as e:
         st.error(f"Erro ao carregar requisições: {str(e)}")
         return []
+
+def renumerar_requisicoes():
+    try:
+        ref = db.reference('/requisicoes')
+        requisicoes = ref.get()
+        
+        if not requisicoes:
+            novo_numero = 5656  # Começar a partir de 5656 se não houver requisições
+        else:
+            # Encontrar o maior número de requisição
+            maior_numero = max(int(req['numero']) for req in requisicoes.values())
+            novo_numero = maior_numero + 1  # Começar do próximo número disponível
+        
+        requisicoes_ordenadas = sorted(requisicoes.items(), key=lambda x: x[1]['data_hora'])
+        
+        for old_key, req_data in requisicoes_ordenadas:
+            novo_key = str(novo_numero)
+            req_data['numero'] = novo_key
+            
+            ref.child(old_key).delete()
+            ref.child(novo_key).set(req_data)
+            
+            novo_numero += 1
+        
+        return True
+    except Exception as e:
+        print(f"Erro ao renumerar requisições no Firebase: {str(e)}")
+        return False
+
+def backup_requisicoes():
+    try:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_file = f'backup/requisicoes_backup_{timestamp}.json'
+        os.makedirs('backup', exist_ok=True)
+        
+        # Obter dados do Firebase
+        ref = db.reference('/requisicoes')
+        requisicoes = ref.get()
+        
+        # Salvar dados em um arquivo JSON
+        with open(backup_file, 'w', encoding='utf-8') as f:
+            json.dump(requisicoes, f, ensure_ascii=False, indent=4)
+        
+        return True
+    except Exception as e:
+        print(f"Erro no backup: {str(e)}")
+        return False
+
+def comprimir_backup(backup_path):
+    with open(backup_path, 'rb') as f_in:
+        with gzip.open(f'{backup_path}.gz', 'wb') as f_out:
+            f_out.writelines(f_in)
+    os.remove(backup_path)  # Remove o arquivo ZIP original após a compressão
+
+def limpar_backups_antigos(backup_dir, dias_manter=7):
+    try:
+        data_limite = datetime.now() - timedelta(days=dias_manter)
+        
+        for arquivo in os.listdir(backup_dir):
+            if arquivo.startswith('backup_') and arquivo.endswith('.json.gz'):
+                caminho_arquivo = os.path.join(backup_dir, arquivo)
+                data_arquivo = datetime.fromtimestamp(os.path.getctime(caminho_arquivo))
+                
+                if data_arquivo < data_limite:
+                    os.remove(caminho_arquivo)
+    except Exception as e:
+        print(f"Erro ao limpar backups antigos: {str(e)}")
+
+def restaurar_backup():
+    try:
+        # Referências para os nós no Firebase
+        requisicoes_ref = db.reference('/requisicoes')
+        
+        # Fazer backup preventivo antes de limpar
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup_preventivo = f'backups/pre_restore_{timestamp}.json'
+        dados_atuais = requisicoes_ref.get()
+        with open(backup_preventivo, 'w', encoding='utf-8') as f:
+            json.dump(dados_atuais, f, ensure_ascii=False, indent=4)
+        
+        # Carrega dados do backup
+        with gzip.open('backup/ultimo_backup.json.gz', 'rt', encoding='utf-8') as f:
+            dados = json.load(f)
+        
+        # Limpa dados atuais e insere dados do backup
+        requisicoes_ref.delete()
+        requisicoes_ref.set(dados['requisicoes'])
+        
+        # Atualiza outros nós se necessário
+        if 'usuarios' in dados:
+            db.reference('/usuarios').set(dados['usuarios'])
+        if 'perfis' in dados:
+            db.reference('/perfis').set(dados['perfis'])
+        
+        # Recarrega dados na sessão
+        st.session_state.requisicoes = carregar_requisicoes()
+        st.success("Backup restaurado com sucesso!")
+        return True
+        
+    except Exception as e:
+        st.error(f"Erro ao restaurar backup: {str(e)}")
+        # Restaura backup preventivo em caso de erro
+        if os.path.exists(backup_preventivo):
+            with open(backup_preventivo, 'r', encoding='utf-8') as f:
+                dados_preventivos = json.load(f)
+            requisicoes_ref.set(dados_preventivos)
+        return False
+
+def salvar_requisicao(requisicao):
+    try:
+        ref = db.reference('/requisicoes')
+        ref.child(requisicao['numero']).set(requisicao) # AQUI ESTÁ O PROBLEMA!
+        return True
+    except Exception as e:
+        st.error(f"Erro ao salvar requisição: {str(e)}")
+        return False
 
 def get_data_hora_brasil():
     try:
@@ -446,144 +519,202 @@ def enviar_email(destinatario, assunto, mensagem):
         st.error(f"Erro ao enviar email: {str(e)}")
         return False
 
-# Inicialização de dados
-if 'usuarios' not in st.session_state:
-    st.session_state.usuarios = carregar_usuarios()
-
 def get_next_requisition_number():
     try:
-        with open('ultimo_numero.json', 'r') as f:
-            ultimo_numero = json.load(f)
-            proximo_numero = ultimo_numero['numero'] + 1
-    except FileNotFoundError:
-        proximo_numero = 5000
-    
-    with open('ultimo_numero.json', 'w') as f:
-        json.dump({'numero': proximo_numero}, f)
-    
-    return proximo_numero
+        ref = db.reference('/requisicoes')
+        requisicoes = ref.get()
+
+        if not requisicoes:
+            proximo_numero = 5000
+        else:
+            # Usar uma compreensão de lista com tratamento de erro para garantir que 'numero' seja um inteiro
+            numeros = [int(req['numero']) for req in requisicoes.values() if isinstance(req['numero'], (int, str)) and str(req['numero']).isdigit()]
+            proximo_numero = max(numeros) + 1 if numeros else 5000
+
+        # Atualiza o número no Firebase
+        db.reference('/ultimo_numero').set({'numero': proximo_numero})
+
+        return str(proximo_numero)  # Garante que o retorno seja uma string
+    except Exception as e:
+        st.error(f"Erro ao gerar número da requisição: {str(e)}")
+        return None
 
 def inicializar_numero_requisicao():
     try:
-        with open('ultimo_numero.json', 'r') as f:
-            return json.load(f)['numero']
-    except FileNotFoundError:
-        with open('ultimo_numero.json', 'w') as f:
-            json.dump({'numero': 4999}, f)
+        ref = db.reference('/ultimo_numero')
+        ultimo_numero = ref.get()
+        if not ultimo_numero:
+            ref.set({'numero': 4999})
             return 4999
+        return ultimo_numero['numero']
+    except Exception as e:
+        st.error(f"Erro ao inicializar número de requisição: {str(e)}")
+        return 4999
 
-# Inicialização de dados...
+# Inicialização de dados
 if 'usuarios' not in st.session_state:
     st.session_state.usuarios = carregar_usuarios()
-if not os.path.exists('ultimo_numero.json'):
-    inicializar_numero_requisicao()
-if 'requisicoes' not in st.session_state:
-    inicializar_banco()
-    st.session_state.requisicoes = carregar_requisicoes_db()
+    if 'requisicoes' not in st.session_state:
+        st.session_state.requisicoes = carregar_requisicoes()
 
+# Inicialização dos perfis
+if 'perfis' not in st.session_state:
+    perfis_ref = db.reference('/perfis')
+    perfis = perfis_ref.get()
+    if not perfis:
+        perfis = {
+            'vendedor': {
+                'dashboard': True,
+                'requisicoes': True,
+                'cotacoes': True,
+                'importacao': False,
+                'configuracoes': False,
+                'editar_usuarios': False,
+                'excluir_usuarios': False,
+                'editar_perfis': False
+            },
+            'comprador': {
+                'dashboard': True,
+                'requisicoes': True,
+                'cotacoes': True,
+                'importacao': True,
+                'configuracoes': False,
+                'editar_usuarios': False,
+                'excluir_usuarios': False,
+                'editar_perfis': False
+            },
+            'administrador': {
+                'dashboard': True,
+                'requisicoes': True,
+                'cotacoes': True,
+                'importacao': True,
+                'configuracoes': True,
+                'editar_usuarios': True,
+                'excluir_usuarios': True,
+                'editar_perfis': True
+            }
+        }
+        perfis_ref.set(perfis)
+    st.session_state.perfis = perfis
+
+inicializar_numero_requisicao()
+        
 def tela_login():
-    st.title("PORTAL - JETFRIO")
-    usuario = st.text_input("Usuário", key="usuario_input").upper()
+    st.markdown("""
+        <style>
+        div.stButton > button:first-child {
+            background-color: #0088ff;
+            color: white;
+            font-weight: bold;
+        }
+        div.stButton > button:hover {
+            background-color: #0066cc;
+            color: white;
+        }
+        </style>
+    """, unsafe_allow_html=True)
     
-    if usuario:
-        if usuario in st.session_state.usuarios:
-            user_data = st.session_state.usuarios[usuario]
-            
-            if user_data.get('primeiro_acesso', True):
-                st.markdown("### 😊 Primeiro Acesso - Configure sua senha")
-                with st.form("primeiro_acesso_form"):
-                    nova_senha = st.text_input("Nova Senha", type="password", 
-                        help="Mínimo 8 caracteres, incluindo letra maiúscula, minúscula e número")
-                    confirma_senha = st.text_input("Confirme a Nova Senha", type="password")
-                    
-                    if st.form_submit_button("Cadastrar Senha"):
-                        if len(nova_senha) < 4:
-                            st.error("A senha deve ter no mínimo 4 caracteres")
-                            return
-                            
-                        if nova_senha != confirma_senha:
-                            st.error("As senhas não coincidem")
-                            return
-                            
-                        st.session_state.usuarios[usuario]['senha'] = nova_senha
-                        st.session_state.usuarios[usuario]['primeiro_acesso'] = False
-                        salvar_usuarios()
-                        st.success("Senha cadastrada com sucesso!")
-                        time.sleep(1)
-                        st.rerun()
-            else:
-                senha = st.text_input("Senha", type="password", key="senha_input")
-                col1, col2 = st.columns([1, 1])
-                
-                with col1:
-                    if st.button("Entrar", use_container_width=True):
-                        if not user_data.get('ativo', True):
-                            st.error("USUÁRIO INATIVO - CONTATE O ADMINISTRADOR")
-                            return
-                            
-                        if user_data['senha'] != senha:
-                            st.error("Senha incorreta")
-                            return
-                            
-                        st.session_state['usuario'] = usuario
-                        st.session_state['perfil'] = user_data['perfil']
-                        st.success(f"Bem-vindo, {usuario}!")
-                        time.sleep(1)
-                        st.rerun()
-                
-                with col2:
-                    if st.button("Esqueci a Senha", use_container_width=True):
-                        st.session_state['modo_login'] = 'recuperar_senha'
-                        st.session_state['temp_usuario'] = usuario
-                        st.rerun()
-        else:
-            st.error("Usuário não encontrado no sistema")
-
-    if st.session_state.get('modo_login') == 'recuperar_senha':
-        st.markdown("### 🔑 Recuperação de Senha")
-        with st.form("recuperar_senha_form"):
-            email = st.text_input("Digite seu email cadastrado")
-            
-            if st.form_submit_button("Verificar Email"):
-                if not email:
-                    st.error("Digite seu email")
-                    return
-                    
-                usuario = st.session_state.get('temp_usuario')
-                if (usuario in st.session_state.usuarios and 
-                    st.session_state.usuarios[usuario]['email'].lower() == email.lower()):
-                    st.session_state['modo_login'] = 'redefinir_senha'
+    st.title("PORTAL - JETFRIO")
+    nome_usuario = st.text_input("Nome de Usuário", key="usuario_input").upper()
+    senha = st.text_input("Senha", type="password", key="senha_input")
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        if st.button("Entrar", use_container_width=True, type="primary"):
+            try:
+                # Autenticação para o usuário administrador
+                if nome_usuario == "ZAQUEU SOUZA" and senha == "Za@031162":
+                    st.session_state['user_id'] = "admin"
+                    st.session_state['usuario'] = "ZAQUEU SOUZA"
+                    st.session_state['email'] = "Importacao@jetfrio.com.br"
+                    st.session_state['perfil'] = "administrador"
+                    st.success(f"Bem-vindo, {st.session_state['usuario']}!")
                     st.rerun()
+                
                 else:
-                    st.error("Email não corresponde ao cadastrado")
+                    # Busca o usuário no Realtime Database com base no nome de usuário
+                    usuarios_ref = db.reference('usuarios')
+                    todos_usuarios = usuarios_ref.get()
+                    
+                    usuario_encontrado = None
+                    user_id = None
+                    
+                    for uid, dados_usuario in todos_usuarios.items():
+                        if dados_usuario.get('nome', '').upper() == nome_usuario:
+                            usuario_encontrado = dados_usuario
+                            user_id = uid
+                            break
+                    
+                    # Se o usuário não for encontrado, exibe uma mensagem de erro
+                    if usuario_encontrado is None:
+                        st.error("Usuário não encontrado.")
+                        return
+                    
+                    # Valida a senha
+                    senha_armazenada = usuario_encontrado.get('senha', '')
+                    if senha != senha_armazenada:
+                        st.error("Senha incorreta.")
+                        return
+                    
+                    # Define as variáveis de sessão
+                    st.session_state['user_id'] = user_id
+                    st.session_state['usuario'] = usuario_encontrado.get('nome', nome_usuario)
+                    st.session_state['perfil'] = usuario_encontrado.get('perfil', 'vendedor')
+                    
+                    st.success(f"Bem-vindo, {st.session_state['usuario']}!")
+                    st.rerun()
 
-    elif st.session_state.get('modo_login') == 'redefinir_senha':
-        st.markdown("### 🔐 Nova Senha")
-        with st.form("redefinir_senha_form"):
-            nova_senha = st.text_input("Nova Senha", type="password",
-                help="Mínimo 8 caracteres, incluindo letra maiúscula, minúscula e número")
-            confirma_senha = st.text_input("Confirme a Nova Senha", type="password")
-            
-            if st.form_submit_button("Redefinir Senha"):
-                if len(nova_senha) < 8:
-                    st.error("A senha deve ter no mínimo 8 caracteres")
-                    return
-                    
-                if nova_senha != confirma_senha:
-                    st.error("As senhas não coincidem")
-                    return
-                    
-                usuario = st.session_state['temp_usuario']
-                st.session_state.usuarios[usuario]['senha'] = nova_senha
-                st.session_state.usuarios[usuario]['primeiro_acesso'] = False
-                salvar_usuarios()
-                st.success("Senha redefinida com sucesso!")
-                time.sleep(1)
-                st.session_state.pop('modo_login')
-                st.session_state.pop('temp_usuario')
-                st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao fazer login: {str(e)}")
+    
+    with col2:
+        if st.button("Esqueci a Senha", use_container_width=True):
+            st.warning("Entre em contato com o administrador para redefinir sua senha.")
+
+def criar_novo_usuario(email, senha, nome, perfil):
+    try:
+        # Verificar se o usuário atual tem permissão para criar novos usuários
+        if not tem_permissao_criar_usuario():
+            st.error("Você não tem permissão para criar novos usuários.")
+            return False
+
+        user = auth.create_user(
+            email=email,
+            password=senha
+        )
+        
+        # Adicionar informações adicionais ao Realtime Database
+        user_ref = db.reference(f'/usuarios/{user.uid}')
+        user_ref.set({
+            'nome': nome,
+            'email': email,
+            'perfil': perfil,
+            'ativo': True,
+            'data_criacao': get_data_hora_brasil()
+        })
+        
+        return True
+    except Exception as e:
+        st.error(f"Erro ao criar usuário: {str(e)}")
+        return False
+
+def tem_permissao_criar_usuario():
+    if 'perfil' not in st.session_state:
+        return False
+    
+    perfil_atual = st.session_state['perfil']
+    perfis_ref = db.reference('/perfis')
+    perfis = perfis_ref.get()
+    
+    if perfis and perfil_atual in perfis:
+        return perfis[perfil_atual].get('editar_usuarios', False)
+    
+    return False
 
 def menu_lateral():
+    if 'user_id' not in st.session_state:
+        return None  # Retorna None se o usuário não estiver autenticado
+
     with st.sidebar:
         st.markdown("""
             <style>
@@ -642,11 +773,26 @@ def menu_lateral():
 
         st.markdown("### Menu")
         st.markdown("---")
+
+        # Obter as permissões do perfil do usuário
+        permissoes = get_permissoes_perfil(st.session_state.get('perfil', 'vendedor'))
         
-        menu_items = ["📊 Dashboard", "📝 Requisições", "⚙️ Configurações"]
-        if st.session_state['perfil'] in ['administrador', 'comprador']:
-            menu_items.insert(-1, "🛒 Cotações")
-            menu_items.insert(-1, "✈️ Importação")
+        # Lista de itens de menu com base nas permissões
+        menu_items = []
+        if permissoes.get('dashboard', False):
+            menu_items.append("📊 Dashboard")
+        if permissoes.get('requisicoes', False):
+            menu_items.append("📝 Requisições")
+        if permissoes.get('cotacoes', False):
+            menu_items.append("🛒 Cotações")
+        if permissoes.get('importacao', False):
+            menu_items.append("✈️ Importação")
+        if permissoes.get('configuracoes', False):
+            menu_items.append("⚙️ Configurações")
+        
+        if not menu_items:
+            st.warning("Nenhuma tela disponível para este perfil.")
+            return None
         
         menu = st.radio("", menu_items, label_visibility="collapsed")
         
@@ -664,14 +810,21 @@ def menu_lateral():
         
         with st.container():
             if st.button("🚪 Sair", key="logout_button", use_container_width=False):
-                for key in list(st.session_state.keys()):
-                    del st.session_state[key]
-                st.rerun()
+                try:
+                    firebase_admin.auth.revoke_refresh_tokens(st.session_state.get('user_id', ''))
+                except Exception as e:
+                    st.error(f"Erro ao fazer logout: {str(e)}")
+                finally:
+                    for key in list(st.session_state.keys()):
+                        del st.session_state[key]
+                    st.rerun()
 
         return menu.split(" ")[-1]
 
 def dashboard():
-    st.title("Dashboard")
+    # Garante que as requisições sejam carregadas
+    if 'requisicoes' not in st.session_state:
+        st.session_state.requisicoes = carregar_requisicoes()
     
     # Definição dos ícones e cores dos status com transparência
     status_config = {
@@ -683,9 +836,9 @@ def dashboard():
     }
     
     # Filtrar requisições baseado no perfil do usuário
-    if st.session_state['perfil'] == 'vendedor':
-        requisicoes_filtradas = [r for r in st.session_state.requisicoes if r['vendedor'] == st.session_state['usuario']]
-        st.info(f"Visualizando requisições do vendedor: {st.session_state['usuario']}")
+    if st.session_state.get('perfil') == 'vendedor':
+        requisicoes_filtradas = [r for r in st.session_state.requisicoes if r['vendedor'] == st.session_state.get('usuario')]
+        st.info(f"Visualizando requisições do vendedor: {st.session_state.get('usuario')}")
     else:
         requisicoes_filtradas = st.session_state.requisicoes
     
@@ -772,8 +925,7 @@ def dashboard():
         # Coluna do gráfico (esquerda)
         with col_vazia:
             try:
-                import plotly.graph_objects as go
-                
+                                
                 # Dados para o gráfico
                 dados_grafico = []
                 if abertas > 0:
@@ -784,7 +936,6 @@ def dashboard():
                     dados_grafico.append(('Finalizadas', finalizadas, status_config['FINALIZADA']['cor']))
                 if recusadas > 0:
                     dados_grafico.append(('Recusadas', recusadas, status_config['RECUSADA']['cor']))
-
                 # Se não houver dados, incluir todos os status com valor 0
                 if not dados_grafico:
                     dados_grafico = [
@@ -837,6 +988,9 @@ def dashboard():
     # Tabela detalhada em toda a largura
     st.markdown("### Requisições Detalhadas")
     if requisicoes_filtradas:
+        # Ordenar requisições por número em ordem decrescente
+        requisicoes_filtradas = sorted(requisicoes_filtradas, key=lambda x: x['numero'], reverse=True)
+        
         df_requisicoes = pd.DataFrame([{
             'Número': f"{req['numero']}",
             'Data/Hora Criação': req['data_hora'],
@@ -865,6 +1019,9 @@ def dashboard():
         st.info("Nenhuma requisição encontrada.")
 
 def nova_requisicao():
+    # Inicializa a variável de observações no início da função
+    observacoes_vendedor = ""
+    
     if st.session_state.get('modo_requisicao') != 'nova':
         st.title("REQUISIÇÕES")
         col1, col2 = st.columns([4,1])
@@ -882,6 +1039,13 @@ def nova_requisicao():
         cliente = st.text_input("CLIENTE", key="cliente").upper()
     with col2:
         st.write(f"**VENDEDOR:** {st.session_state.get('usuario', '')}")
+
+    col1, col2 = st.columns(2)
+    with col2:
+        if st.button("❌ CANCELAR", type="secondary", use_container_width=True):
+            st.session_state.items_temp = []
+            st.session_state['modo_requisicao'] = None
+            st.rerun()
 
     if st.session_state.get('show_qtd_error'):
         st.markdown('<p style="color: #ff4b4b; margin: 0; padding: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">PREENCHIMENTO OBRIGATÓRIO: QUANTIDADE</p>', unsafe_allow_html=True)
@@ -1027,7 +1191,6 @@ def nova_requisicao():
         for idx, item in enumerate(st.session_state.items_temp):
             cols = st.columns([0.5, 1.5, 2, 3.5, 1.5, 0.5, 0.5])
             editing = st.session_state.get('editing_item') == idx
-
             with cols[0]:
                 st.text_input("", value=str(item['item']), disabled=True, key=f"item_{idx}", label_visibility="collapsed")
             with cols[1]:
@@ -1118,58 +1281,157 @@ def nova_requisicao():
                     st.rerun()
 
     if st.session_state.items_temp:
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("✅ ENVIAR", type="primary", use_container_width=True):
-                if not cliente:
-                    st.error("PREENCHIMENTO OBRIGATÓRIO: CLIENTE")
-                    return
-                nova_requisicao = {
-                    'numero': get_next_requisition_number(),
-                    'cliente': cliente,
-                    'vendedor': st.session_state['usuario'],
-                    'data_hora': get_data_hora_brasil(),
-                    'status': 'ABERTA',
-                    'items': st.session_state.items_temp.copy()
-                }
-                st.session_state.requisicoes.append(nova_requisicao)
-                salvar_requisicao_db()
-                st.session_state.items_temp = []
-                st.success("Requisição enviada com sucesso!")
-                st.session_state['modo_requisicao'] = None
-                st.rerun()
-        with col2:
-            if st.button("❌ CANCELAR", type="secondary", use_container_width=True):
-                st.session_state.items_temp = []
-                st.session_state['modo_requisicao'] = None
-                st.rerun()
+        # Checkbox para mostrar campo de observações
+        mostrar_obs = st.checkbox("INCLUIR OBSERVAÇÕES")
+        
+        # Campo de observações só aparece se o checkbox estiver marcado
+        if mostrar_obs:
+            st.markdown("### OBSERVAÇÕES")
+            observacoes_vendedor = st.text_area(
+                "Insira suas observações aqui",
+                key="observacoes_vendedor",
+                height=100
+            )
+        else:
+            observacoes_vendedor = ""  # Valor padrão quando não há observações
 
+        col1, col2 = st.columns(2)
+    with col1:
+        if st.button("✅ ENVIAR", type="primary", use_container_width=True):
+            if not cliente:
+                st.error("PREENCHIMENTO OBRIGATÓRIO: CLIENTE")
+                return
+
+            numero_req = get_next_requisition_number()
+            if numero_req is None:
+                st.error("ERRO AO GERAR NÚMERO DA REQUISIÇÃO. TENTE NOVAMENTE.")
+                return
+
+            nova_req = {
+                'numero': numero_req,
+                'cliente': cliente,
+                'vendedor': st.session_state['usuario'],
+                'data_hora': get_data_hora_brasil(),
+                'status': 'ABERTA',
+                'items': st.session_state.items_temp.copy(),
+                'observacoes_vendedor': observacoes_vendedor
+            }
+            if salvar_requisicao(nova_req):
+                    # Limpar os dados temporários
+                    st.session_state.items_temp = []
+                    st.session_state['modo_requisicao'] = None
+
+                    # Atualizar a lista de requisições
+                    st.session_state.requisicoes = carregar_requisicoes()
+
+                    # Exibir toast de sucesso
+                    st.toast('Requisição enviada com sucesso!', icon='✅')
+                    
+                    # Aguardar brevemente antes de recarregar
+                    time.sleep(1)
+                    st.rerun()
+                
 def salvar_configuracoes():
     try:
-        with open('configuracoes.json', 'w') as f:
-            json.dump(st.session_state.config_sistema, f)
+        # Referência para o nó 'configuracoes' no Firebase
+        config_ref = db.reference('/configuracoes')
+        
+        # Salvar as configurações no Firebase
+        config_ref.set(st.session_state.config_sistema)
+        
+        st.success("Configurações salvas com sucesso!")
     except Exception as e:
-        st.error(f"Erro ao salvar configurações: {e}")
+        st.error(f"Erro ao salvar configurações: {str(e)}")
+
+def carregar_configuracoes():
+    try:
+        # Referência para o nó 'configuracoes' no Firebase
+        config_ref = db.reference('/configuracoes')
+        
+        # Obter as configurações do Firebase
+        configuracoes = config_ref.get()
+        
+        # Se não houver configurações, retornar um dicionário vazio ou configurações padrão
+        if not configuracoes:
+            return {}  # ou return configuracoes_padrao
+        
+        return configuracoes
+    except Exception as e:
+        st.error(f"Erro ao carregar configurações: {e}")
+        return {}  # ou return configuracoes_padrao
+
+# Inicialização das configurações (você pode adicionar isso no início do seu script principal)
+if 'config_sistema' not in st.session_state:
+    st.session_state.config_sistema = carregar_configuracoes()
+
+def carregar_temas():
+    try:
+        temas_ref = db.reference('/temas')
+        temas = temas_ref.get()
+        if temas:
+            return temas
+        else:
+            return {}
+    except Exception as e:
+        st.error(f"Erro ao carregar temas: {str(e)}")
+        return {}
+
+def aplicar_tema(tema):
+    if tema:
+        st.markdown(f"""
+            <style>
+            body {{
+                font-family: {tema.get('font_family', 'Arial')};
+                font-size: {tema.get('font_size', 12)}px;
+                color: {tema.get('text_color', '#000000')};
+                background-color: {tema.get('background_color', '#FFFFFF')};
+            }}
+            :root {{
+                --primary-color: {tema.get('primary_color', '#2D2C74')};
+                --background-color: {tema.get('background_color', '#FFFFFF')};
+                --text-color: {tema.get('text_color', '#000000')};
+            }}
+            </style>
+        """, unsafe_allow_html=True)
+        st.success("Tema aplicado com sucesso!")
+    else:
+        st.warning("Nenhum tema selecionado.")
+
+def salvar_tema_usuario(tema):
+    try:
+        tema_usuario_ref = db.reference(f'/temas_usuarios/{st.session_state["usuario"]}')
+        tema_usuario_ref.set(tema)
+        st.success("Tema salvo para o usuário com sucesso!")
+    except Exception as e:
+        st.error(f"Erro ao salvar tema: {str(e)}")
+
+def remover_tema_usuario():
+    try:
+        tema_usuario_ref = db.reference(f'/temas_usuarios/{st.session_state["usuario"]}')
+        tema_usuario_ref.delete()
+        st.success("Tema removido para o usuário com sucesso!")
+    except Exception as e:
+        st.error(f"Erro ao remover tema: {str(e)}")
 
 def requisicoes():
     st.title("REQUISIÇÕES")
-    
+
     # Atualização automática
     if 'ultima_atualizacao' not in st.session_state:
         st.session_state.ultima_atualizacao = time.time()
-    
-    if time.time() - st.session_state.ultima_atualizacao > 30:
+
+    if time.time() - st.session_state.ultima_atualizacao > 60:
         st.session_state.requisicoes = carregar_requisicoes()
         st.session_state.ultima_atualizacao = time.time()
         st.rerun()
-    
+
     # Estilização
     st.markdown("""
         <style>
         .filtros-container {
             background-color: white;
             padding: 0px;
-            border-radius: 8px;
+            border-radius: 4px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             margin-bottom: 12px;
         }
@@ -1236,7 +1498,7 @@ def requisicoes():
         .header-info {
             display: flex;
             justify-content: space-between;
-            padding: 8px;
+            padding: 0px;
             background-color: white;
             border-bottom: 1px solid #eee;
             margin-bottom: 0;
@@ -1246,7 +1508,7 @@ def requisicoes():
             padding: 0 8px;
         }
         .header-group p {
-            margin: 3px 0;
+            margin: 0px 0;
             color: #444;
         }
         .requisicao-table {
@@ -1292,23 +1554,23 @@ def requisicoes():
             text-align: right; 
         }
         .action-buttons {
-            padding: 10px;
+            padding: 1px;
             background-color: white;
             border-top: 1px solid #eee;
-            margin-top: 3px;
+            margin-top: 0px;
             display: flex;
             justify-content: space-between;
             gap: 10px;
         }
         .input-container {
             background-color: white;
-            padding: 10px;
+            padding: 0px;
             border-radius: 8px;
             margin-top: 1px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
         .observacao-geral {
-            margin-top: 15px;
+            margin-top: 10px;
             padding: 10px;
             background-color: #f8f9fa;
             border-radius: 8px;
@@ -1323,7 +1585,7 @@ def requisicoes():
         }
         </style>
     """, unsafe_allow_html=True)
-    
+
     # Botão Nova Requisição
     col1, col2 = st.columns([4,1])
     with col2:
@@ -1337,7 +1599,7 @@ def requisicoes():
         # Filtros em container
         with st.container():
             st.markdown('<div class="filtros-container">', unsafe_allow_html=True)
-            
+
             # Primeira linha de filtros
             col1, col2, col3, col4 = st.columns([2,2,3,1])
             with col1:
@@ -1369,6 +1631,16 @@ def requisicoes():
             )
             st.markdown('</div>', unsafe_allow_html=True)
 
+        # Carrega as requisições do Firebase
+        requisicoes_firebase = carregar_requisicoes()
+
+        # Verifica se st.session_state.requisicoes existe, senão, inicializa com as requisições do Firebase
+        if 'requisicoes' not in st.session_state:
+            st.session_state.requisicoes = requisicoes_firebase
+        else:
+            # Se já existe, atualiza com os dados do Firebase
+            st.session_state.requisicoes = requisicoes_firebase
+
         # Lógica de filtragem e exibição
         requisicoes_visiveis = []
         if st.session_state['perfil'] == 'vendedor':
@@ -1376,7 +1648,6 @@ def requisicoes():
         else:
             requisicoes_visiveis = st.session_state.requisicoes.copy()
 
-        # Aplicar filtros
         if buscar:
             if numero_busca:
                 requisicoes_visiveis = [req for req in requisicoes_visiveis if str(numero_busca) in str(req['numero'])]
@@ -1398,15 +1669,15 @@ def requisicoes():
             if req['status'] in selected_status:
                 st.markdown(f"""
                     <div class="requisicao-card" style="background-color: {
-                        'rgba(46, 204, 113, 0.1)' if req['status'] == 'ABERTA'
-                        else 'rgba(241, 196, 15, 0.1)' if req['status'] == 'EM ANDAMENTO'
-                        else 'rgba(52, 152, 219, 0.1)' if req['status'] == 'FINALIZADA'
-                        else 'rgba(231, 76, 60, 0.1)' if req['status'] == 'RECUSADA'
+                        'rgba(46, 204, 113, 0.2)' if req['status'] == 'ABERTA'
+                        else 'rgba(241, 196, 15, 0.2)' if req['status'] == 'EM ANDAMENTO'
+                        else 'rgba(52, 152, 219, 0.2)' if req['status'] == 'FINALIZADA'
+                        else 'rgba(231, 76, 60, 0.2)' if req['status'] == 'RECUSADA'
                         else 'var(--background-color)'};
                         color: var(--text-color)">
                         <div class="requisicao-info" style="color: var(--text-color)">
                             <div>
-                                <span class="requisicao-numero" style="color: var(--text-color)">#</span>
+                                <span class="requisicao-numero" style="color: var(--text-color)"></span>
                                 <span class="requisicao-numero" style="color: var(--text-color)">{req['numero']}</span>
                                 <span class="requisicao-cliente" style="color: var(--text-color)">{req['cliente']}</span>
                             </div>
@@ -1419,7 +1690,7 @@ def requisicoes():
                                 <span>CRIADO EM: {req['data_hora']}</span>
                                 <span>VENDEDOR: {req['vendedor']}</span>
                             </div>
-                            <span>COMPRADOR: {req.get('comprador_responsavel', '-')}</span>
+                            <span>COMPRADOR: {req.get('comprador_responsavel', '-')}
                         </div>
                     </div>
                 """, unsafe_allow_html=True)
@@ -1439,14 +1710,14 @@ def requisicoes():
                                 color: var(--text-color) !important;
                                 border: 1px solid var(--secondary-background-color);">
                         """, unsafe_allow_html=True)
-                        
+
                         st.markdown("""
                             <div class="detalhes-header" style="
                                 background-color: var(--background-color);
                                 color: var(--text-color) !important;
                                 border-bottom: 1px solid var(--secondary-background-color);">
                         """, unsafe_allow_html=True)
-                        
+
                         if req['status'] == 'ABERTA' and st.session_state['perfil'] in ['comprador', 'administrador']:
                             col1, col2, col3, col4 = st.columns([2,1,1,1])
                             with col2:
@@ -1454,12 +1725,7 @@ def requisicoes():
                                     req['status'] = 'EM ANDAMENTO'
                                     req['comprador_responsavel'] = st.session_state['usuario']
                                     req['data_hora_aceite'] = get_data_hora_brasil()
-                                    if salvar_requisicao_db():
-                                        enviar_notificacao(
-                                            f"Requisição {req['numero']} Aceita",
-                                            f"{st.session_state['usuario']} aceitou a requisição Nº{req['numero']} para o cliente {req['cliente']}",
-                                            req['numero']
-                                        )
+                                    if salvar_requisicao(req):
                                         st.success("Requisição aceita com sucesso!")
                                         st.rerun()
                             with col3:
@@ -1477,7 +1743,6 @@ def requisicoes():
                                     st.session_state.pop(f'mostrar_detalhes_{req["numero"]}')
                                     st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
-
                         st.markdown(f"""
                             <div class="header-info" style="
                                 background-color: var(--background-color);
@@ -1508,24 +1773,20 @@ def requisicoes():
                                     if not justificativa:
                                         st.error("Por favor, informe a justificativa da recusa.")
                                         return
-                                    
+
                                     req['status'] = 'RECUSADA'
                                     req['comprador_responsavel'] = st.session_state['usuario']
                                     req['data_hora_resposta'] = get_data_hora_brasil()
                                     req['justificativa_recusa'] = justificativa
-                                    
-                                    if salvar_requisicao_db():
+
+                                    if salvar_requisicao(req):
                                         try:
-                                            enviar_notificacao(
-                                                f"Requisição {req['numero']} Recusada",
-                                                f"{st.session_state['usuario']} recusou a requisição Nº{req['numero']} para o cliente {req['cliente']}. Justificativa: {justificativa}",
-                                                req['numero']
-                                            )
+                                            enviar_email_requisicao(req, "recusada")
                                             st.success("Requisição recusada com sucesso!")
                                             st.rerun()
                                         except Exception as e:
                                             st.error(f"Erro ao enviar notificação: {str(e)}")
-                                    
+
                             with col2:
                                 if st.button("CANCELAR", key=f"cancelar_recusa_{req['numero']}", type="secondary", use_container_width=True):
                                     st.session_state.pop(f'mostrar_justificativa_{req["numero"]}')
@@ -1533,7 +1794,17 @@ def requisicoes():
 
                         # Itens da requisição
                         st.markdown('<div class="items-title">ITENS DA REQUISIÇÃO</div>', unsafe_allow_html=True)
-                        if req['items']:
+
+                        # Garante que req['items'] é uma lista de dicionários
+                        items = req.get('items', [])
+                        if items and isinstance(items, str):
+                            try:
+                                items = json.loads(items)  # Converte a string JSON para uma lista
+                            except json.JSONDecodeError as e:
+                                st.error(f"Erro ao decodificar os itens da requisição {req['numero']}: {e}")
+                                items = []  # Garante que items seja uma lista vazia para evitar erros
+
+                        if items:
                             items_df = pd.DataFrame([{
                                 'Código': item.get('codigo', '-'),
                                 'Cód. Fabricante': item.get('cod_fabricante', '-'),
@@ -1543,7 +1814,7 @@ def requisicoes():
                                 'R$ Venda Unit': f"R$ {item.get('venda_unit', 0):.2f}",
                                 'R$ Total': f"R$ {(item.get('venda_unit', 0) * item['quantidade']):.2f}",
                                 'Prazo': item.get('prazo_entrega', '-')
-                            } for item in req['items']])
+                            } for item in items])
 
                             st.dataframe(
                                 items_df,
@@ -1560,6 +1831,22 @@ def requisicoes():
                                     "Prazo": st.column_config.TextColumn("PRAZO", width=100)
                                 }
                             )
+
+                            # Exibição das observações do vendedor
+                            if req.get('observacoes_vendedor'):
+                                st.markdown("""
+                                    <div style='background-color: var(--background-color);
+                                              border-radius: 4px;
+                                              padding: 10px;
+                                              margin: 10px 0 0px 0;
+                                              border-left: 4px solid #1B81C5;
+                                              border: 1px solid var(--secondary-background-color);'>
+                                        <p style='color: var(--text-color);
+                                                  font-weight: bold;
+                                                  margin-bottom: 10px;'>OBSERVAÇÕES DO VENDEDOR:</p>
+                                        <p style='margin: 0 0 5px 0; color: var(--text-color);'>{}</p>
+                                    </div>
+                                """.format(req['observacoes_vendedor']), unsafe_allow_html=True)
 
                             # Exibição da justificativa de recusa
                             if req['status'] == 'RECUSADA':
@@ -1591,13 +1878,13 @@ def requisicoes():
                             if req.get('observacao_geral'):
                                 st.markdown("""
                                     <div style='background-color: var(--background-color);
-                                              border-radius: 4px; 
-                                              padding: 15px; 
-                                              margin: 20px 0 25px 0; 
+                                              border-radius: 4px;
+                                              padding: 15px;
+                                              margin: 20px 0 25px 0;
                                               border-left: 4px solid #2D2C74;
                                               border: 1px solid var(--secondary-background-color);'>
-                                        <p style='color: var(--text-color); 
-                                                  font-weight: bold; 
+                                        <p style='color: var(--text-color);
+                                                  font-weight: bold;
                                                   margin-bottom: 10px;'>OBSERVAÇÕES DO COMPRADOR:</p>
                                         <p style='margin: 0 0 5px 0; color: var(--text-color);'>{}</p>
                                     </div>
@@ -1605,34 +1892,39 @@ def requisicoes():
 
                             if req['status'] == 'EM ANDAMENTO' and st.session_state['perfil'] in ['comprador', 'administrador']:
                                 st.markdown('<div class="input-container">', unsafe_allow_html=True)
-                                
+
                                 # Seleção do item para resposta
                                 item_selecionado = st.selectbox(
                                     "SELECIONE O ITEM PARA RESPONDER",
-                                    options=[f"ITEM {item['item']}: {item['descricao']}" for item in req['items']],
+                                    options=[f"ITEM {item['item']}: {item['descricao']}" for item in items],
                                     key=f"select_item_{req['numero']}"
                                 )
-                                
+
                                 # Índice do item selecionado
                                 item_idx = int(item_selecionado.split(':')[0].replace('ITEM ', '')) - 1
-                                item = req['items'][item_idx]
+                                item = items[item_idx]
 
                                 # Campos de resposta em linha única
                                 col1, col2, col3 = st.columns(3)
                                 with col1:
-                                    item['custo_unit'] = st.number_input(
+                                    custo_str = st.text_input(
                                         "R$ UNIT",
-                                        value=item.get('custo_unit', 0.0),
-                                        min_value=0.0,
-                                        format="%.2f",
+                                        value=f"{item.get('custo_unit', 0.0):,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'),
                                         key=f"custo_{req['numero']}_{item_idx}"
                                     )
+                                    # Converte o valor digitado para float
+                                    try:
+                                        custo_str = custo_str.replace('.', '').replace(',', '.')
+                                        item['custo_unit'] = float(custo_str)
+                                    except ValueError:
+                                        item['custo_unit'] = 0.0
+
                                 with col2:
                                     item['markup'] = st.number_input(
                                         "% MARKUP",
                                         value=item.get('markup', 0.0),
                                         min_value=0.0,
-                                        format="%.2f",
+                                        format="%.0f",
                                         step=1.0,
                                         key=f"markup_{req['numero']}_{item_idx}"
                                     )
@@ -1642,6 +1934,13 @@ def requisicoes():
                                         value=item.get('prazo_entrega', ''),
                                         key=f"prazo_{req['numero']}_{item_idx}"
                                     )
+
+                                # Cálculo automático quando custo e markup são preenchidos
+                                if item['custo_unit'] > 0 and item['markup'] > 0:
+                                    item['venda_unit'] = item['custo_unit'] * (1 + (item['markup'] / 100))
+                                    item['venda_total'] = item['venda_unit'] * item['quantidade']
+                                    item['salvo'] = True
+                                    salvar_requisicao(req)
 
                                 # Checkbox e campo para observações
                                 mostrar_obs = st.checkbox(
@@ -1661,81 +1960,79 @@ def requisicoes():
                                 col_btn1, col_btn2 = st.columns(2)
                                 with col_btn1:
                                     if st.button("💾 SALVAR ITEM", key=f"salvar_{req['numero']}_{item_idx}", type="primary"):
-                                        # Calcular valor de venda
-                                        item['venda_unit'] = item['custo_unit'] * (1 + (item['markup'] / 100))
-                                        item['venda_total'] = item['venda_unit'] * item['quantidade']
-                                        item['salvo'] = True
                                         if mostrar_obs:
                                             req['observacao_geral'] = observacao_geral
-                                        salvar_requisicao_db()
+                                        salvar_requisicao(req)
                                         st.success(f"ITEM {item['item']} SALVO COM SUCESSO!")
                                         st.rerun()
-                                
+
                                 with col_btn2:
-                                    todos_itens_salvos = all(item.get('salvo', False) for item in req['items'])
+                                    todos_itens_salvos = all(item.get('salvo', False) for item in items)
                                     if todos_itens_salvos:
                                         if st.button("✅ FINALIZAR", key=f"finalizar_{req['numero']}", type="primary"):
                                             req['status'] = 'FINALIZADA'
                                             req['data_hora_resposta'] = get_data_hora_brasil()
-                                            if salvar_requisicao_db():
-                                                enviar_notificacao(
-                                                    f"REQUISIÇÃO {req['numero']} FINALIZADA",
-                                                    f"{st.session_state['usuario']} finalizou a requisição Nº{req['numero']} para o cliente {req['cliente']}",
-                                                    req['numero']
-                                                )
+                                            if salvar_requisicao(req):
+                                                enviar_email_requisicao(req, "finalizada")
                                                 st.success("REQUISIÇÃO FINALIZADA COM SUCESSO!")
                                                 st.rerun()
                                             else:
                                                 st.error("ERRO AO SALVAR A REQUISIÇÃO. TENTE NOVAMENTE.")
-
-def configurar_notificacoes():
-    st.markdown("#### Configurações de Notificações")
+                                                
+def get_permissoes_perfil(perfil):
+    # Referência para o nó 'perfis' no Firebase
+    perfis_ref = db.reference('perfis')
     
-    # Inicializar configuração no session_state
-    if 'notificacoes_ativas' not in st.session_state:
-        st.session_state.notificacoes_ativas = True
+    # Busca as permissões do perfil específico no Firebase
+    permissoes = perfis_ref.child(perfil).get()
     
-    # Toggle para ativar/desativar notificações
-    notificacoes_ativas = st.toggle(
-        "Ativar notificações na área de trabalho",
-        value=st.session_state.notificacoes_ativas,
-        key="toggle_notificacoes"
-    )
+    # Se não encontrar permissões específicas, use as permissões padrão
+    if not permissoes:
+        permissoes_padrao = {
+            'vendedor': {
+                'dashboard': True,
+                'requisicoes': True,
+                'cotacoes': True,
+                'importacao': False,
+                'configuracoes': False,
+                'editar_usuarios': False,
+                'excluir_usuarios': False,
+                'editar_perfis': False
+            },
+            'comprador': {
+                'dashboard': True,
+                'requisicoes': True,
+                'cotacoes': True,
+                'importacao': True,
+                'configuracoes': False,
+                'editar_usuarios': False,
+                'excluir_usuarios': False,
+                'editar_perfis': False
+            },
+            'administrador': {
+                'dashboard': True,
+                'requisicoes': True,
+                'cotacoes': True,
+                'importacao': True,
+                'configuracoes': True,
+                'editar_usuarios': True,
+                'excluir_usuarios': True,
+                'editar_perfis': True
+            }
+        }
+        permissoes = permissoes_padrao.get(perfil, permissoes_padrao['vendedor'])
+        
+        # Salva as permissões padrão no Firebase para uso futuro
+        perfis_ref.child(perfil).set(permissoes)
     
-    # Atualizar estado das notificações
-    if notificacoes_ativas != st.session_state.notificacoes_ativas:
-        st.session_state.notificacoes_ativas = notificacoes_ativas
-        if notificacoes_ativas:
-            solicitar_permissao_notificacao()
-            st.success("Notificações ativadas com sucesso!")
-        else:
-            st.warning("Notificações desativadas")
-    
-    # Botão de teste de notificação
-    st.markdown("---")
-    st.markdown("#### Testar Notificações")
-    if st.button("🔔 Enviar Notificação de Teste", type="primary"):
-        enviar_notificacao(
-            "Teste de Notificação",
-            "Se você está vendo esta mensagem, as notificações estão funcionando corretamente!",
-            "teste"
-        )
-        st.success("Notificação de teste enviada!")
-                                        
-def save_tema(tema):
-    try:
-        with open('tema.json', 'w', encoding='utf-8') as f:
-            json.dump(tema, f, ensure_ascii=False, indent=4)
-        return True
-    except Exception as e:
-        st.error(f"Erro ao salvar tema: {str(e)}")
-        return False
+    return permissoes
 
 def configuracoes():
     st.title("Configurações")
-    
-    # Menu principal apenas para administradores
-    if st.session_state['perfil'] == 'administrador':
+
+    permissoes = get_permissoes_perfil(st.session_state['perfil'])
+
+    if permissoes.get('configuracoes', False):
         col1, col2, col3 = st.columns(3)
         with col1:
             if st.button("👥 Usuários", type="primary", use_container_width=True):
@@ -1750,11 +2047,9 @@ def configuracoes():
                 st.session_state['config_modo'] = 'sistema'
                 st.rerun()
     else:
-        # Para outros perfis, mostrar diretamente as configurações de sistema
         st.session_state['config_modo'] = 'sistema'
 
-    # Seção de Usuários (apenas para administradores)
-    if st.session_state.get('config_modo') == 'usuarios' and st.session_state['perfil'] == 'administrador':
+    if st.session_state.get('config_modo') == 'usuarios':
         st.markdown("""
             <style>
             .stButton > button {
@@ -1784,18 +2079,19 @@ def configuracoes():
         """, unsafe_allow_html=True)
 
         st.markdown("### Gerenciamento de Usuários")
-        
-        # Botão de Cadastro
-        if st.button("➕ Cadastrar Novo Usuário", type="primary", use_container_width=True):
-            st.session_state['modo_usuario'] = 'cadastrar'
-            st.rerun()
 
-        # Formulário de Cadastro
+        # Botão para cadastrar novo usuário (só aparece se tiver permissão)
+        if permissoes.get('cadastrar_usuarios', False):
+            if st.button("➕ Cadastrar Novo Usuário", type="primary", use_container_width=True):
+                st.session_state['modo_usuario'] = 'cadastrar'
+                st.rerun()
+
+        # Form para cadastrar novo usuário (só aparece se o botão for clicado)
         if st.session_state.get('modo_usuario') == 'cadastrar':
             with st.form("cadastro_usuario"):
                 st.subheader("Cadastrar Novo Usuário")
-                
-                col1, col2, col3 = st.columns([2,2,1])
+
+                col1, col2, col3 = st.columns([2, 2, 1])
                 with col1:
                     novo_usuario = st.text_input("Nome do Usuário").upper()
                 with col2:
@@ -1803,297 +2099,411 @@ def configuracoes():
                 with col3:
                     perfil = st.selectbox("Perfil", ['vendedor', 'comprador', 'administrador'])
 
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.form_submit_button("💾 Salvar", type="primary", use_container_width=True):
-                        if novo_usuario and email:
-                            if novo_usuario not in st.session_state.usuarios:
-                                st.session_state.usuarios[novo_usuario] = {
-                                    'senha': None,
-                                    'perfil': perfil,
-                                    'email': email,
-                                    'ativo': True,
-                                    'primeiro_acesso': True,
-                                    'permissoes': get_permissoes_perfil(perfil)
-                                }
-                                salvar_usuarios()
-                                st.success("Usuário cadastrado com sucesso!")
-                                st.session_state['modo_usuario'] = None
-                                st.rerun()
-                            else:
-                                st.error("Usuário já existe")
-                        else:
-                            st.error("Preencha todos os campos")
-                
-                with col2:
-                    if st.form_submit_button("❌ Cancelar", type="primary", use_container_width=True):
+                if st.form_submit_button("Cadastrar"):
+                    if novo_usuario and email and perfil:
+                        usuarios_ref = db.reference('usuarios')
+                        novo_usuario_data = {
+                            'nome': novo_usuario,
+                            'email': email,
+                            'perfil': perfil,
+                            'ativo': True
+                        }
+                        usuarios_ref.child(novo_usuario).set(novo_usuario_data)
+                        st.success(f"Usuário {novo_usuario} cadastrado com sucesso!")
                         st.session_state['modo_usuario'] = None
                         st.rerun()
+                    else:
+                        st.error("Por favor, preencha todos os campos.")
 
-        # Busca e Edição
-        usuarios_filtrados = st.session_state.usuarios
+        usuarios_ref = db.reference('usuarios')
+        usuarios_filtrados = usuarios_ref.get()
 
-        if usuarios_filtrados:
+        if usuarios_filtrados and permissoes.get('editar_usuarios', False):
             st.markdown("#### Editar Usuário")
             usuario_editar = st.selectbox("Selecionar usuário para editar:", list(usuarios_filtrados.keys()))
-            
-            if usuario_editar:
-                dados_usuario = st.session_state.usuarios[usuario_editar]
-                col1, col2, col3, col4 = st.columns([2,2,1,1])
-                
-                with col1:
-                    novo_nome = st.text_input("Nome", value=usuario_editar).upper()
-                with col2:
-                    novo_email = st.text_input("Email", value=dados_usuario['email'])
-                with col3:
-                    novo_perfil = st.selectbox("Perfil", 
-                                             options=['vendedor', 'comprador', 'administrador'],
-                                             index=['vendedor', 'comprador', 'administrador'].index(dados_usuario['perfil']))
-                with col4:
-                    novo_status = st.toggle("Ativo", value=dados_usuario['ativo'])
 
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
-                        if novo_nome != usuario_editar and novo_nome in st.session_state.usuarios:
-                            st.error("Nome de usuário já existe")
-                        else:
-                            if novo_nome != usuario_editar:
-                                st.session_state.usuarios[novo_nome] = st.session_state.usuarios.pop(usuario_editar)
-                            st.session_state.usuarios[novo_nome].update({
-                                'email': novo_email,
-                                'perfil': novo_perfil,
-                                'ativo': novo_status,
-                                'permissoes': get_permissoes_perfil(novo_perfil)
-                            })
-                            salvar_usuarios()
+            if isinstance(usuarios_filtrados, dict):
+                if usuario_editar:
+                    dados_usuario = usuarios_filtrados[usuario_editar]
+                    col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
+
+                    with col1:
+                        novo_nome = st.text_input("Nome", value=usuario_editar).upper()
+                    with col2:
+                        novo_email = st.text_input("Email", value=dados_usuario['email'])
+                    with col3:
+                        novo_perfil = st.selectbox("Perfil",
+                                                 options=['vendedor', 'comprador', 'administrador'],
+                                                 index=['vendedor', 'comprador', 'administrador'].index(
+                                                     dados_usuario['perfil']))
+                    with col4:
+                        novo_status = st.toggle("Ativo", value=dados_usuario['ativo'])
+
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
+                            if novo_nome != usuario_editar and novo_nome in usuarios_filtrados:
+                                st.error("Nome de usuário já existe")
+                            else:
+                                novo_dados = {
+                                    'email': novo_email,
+                                    'perfil': novo_perfil,
+                                    'ativo': novo_status,
+                                }
+                                if novo_nome != usuario_editar:
+                                    usuarios_ref.child(usuario_editar).delete()
+                                    usuarios_ref.child(novo_nome).set(novo_dados)
+                                else:
+                                    usuarios_ref.child(novo_nome).update(novo_dados)
                             st.success("Alterações salvas com sucesso!")
                             st.rerun()
 
-                with col2:
-                    if st.button("🔄 Reset Senha", type="primary", use_container_width=True):
-                        st.session_state.usuarios[novo_nome]['senha'] = None
-                        st.session_state.usuarios[novo_nome]['primeiro_acesso'] = True
-                        salvar_usuarios()
-                        st.success("Senha resetada com sucesso!")
-                        st.rerun()
-
-                with col3:
-                    if st.button("❌ Excluir Usuário", type="primary", use_container_width=True):
-                        if dados_usuario['perfil'] != 'administrador':
-                            st.session_state.usuarios.pop(novo_nome)
-                            salvar_usuarios()
-                            st.success("Usuário excluído com sucesso!")
+                    with col2:
+                        if st.button("🔄 Reset Senha", type="primary", use_container_width=True):
+                            usuarios_ref.child(novo_nome).update({
+                                'senha': None,
+                                'primeiro_acesso': True
+                            })
+                            st.success("Senha resetada com sucesso!")
                             st.rerun()
-                        else:
-                            st.error("Não é possível excluir um administrador")
 
-        # Tabela de Usuários
+                    with col3:
+                        # Excluir Usuário (só aparece se tiver permissão)
+                        if permissoes.get('excluir_usuarios', False):
+                            if st.button("❌ Excluir Usuário", type="primary", use_container_width=True):
+                                if dados_usuario['perfil'] != 'administrador':
+                                    usuarios_ref.child(novo_nome).delete()
+                                    st.success("Usuário excluído com sucesso!")
+                                    st.rerun()
+                                else:
+                                    st.error("Não é possível excluir um administrador")
+            else:
+                st.warning("Nenhum usuário encontrado para editar.")
+
         st.markdown("#### Usuários Cadastrados")
-        usuarios_df = pd.DataFrame([{
-            'Usuário': usuario,
-            'Email': dados['email'],
-            'Perfil': dados['perfil'],
-            'Status': '🟢 Ativo' if dados['ativo'] else '🔴 Inativo'
-        } for usuario, dados in st.session_state.usuarios.items()])
+        usuarios_ref = db.reference('usuarios')
+        usuarios = usuarios_ref.get()
 
-        st.dataframe(
-            usuarios_df,
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                "Usuário": st.column_config.TextColumn("Usuário", width="medium"),
-                "Email": st.column_config.TextColumn("Email", width="medium"),
-                "Perfil": st.column_config.TextColumn("Perfil", width="small"),
-                "Status": st.column_config.TextColumn("Status", width="small")
-            }
-        )
+        # Verifica se usuarios é um dicionário antes de prosseguir
+        if isinstance(usuarios, dict):
+            usuarios_df = pd.DataFrame([{
+                'Usuário': usuario,
+                'Email': dados['email'],
+                'Perfil': dados['perfil'],
+                'Status': '🟢 Ativo' if dados['ativo'] else '🔴 Inativo'
+            } for usuario, dados in usuarios.items()])
 
+            st.dataframe(
+                usuarios_df,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Usuário": st.column_config.TextColumn("Usuário", width="medium"),
+                    "Email": st.column_config.TextColumn("Email", width="medium"),
+                    "Perfil": st.column_config.TextColumn("Perfil", width="small"),
+                    "Status": st.column_config.TextColumn("Status", width="small")
+                }
+            )
+        else:
+            st.info("Nenhum usuário cadastrado.")
     # Seção de Perfis
     elif st.session_state.get('config_modo') == 'perfis':
         st.markdown("### Gerenciamento de Perfis")
         
-        perfis = ['vendedor', 'comprador', 'administrador']
-        perfil_selecionado = st.selectbox("Selecione o perfil para editar", perfis)
+        perfil_selecionado = st.selectbox("Selecione o perfil para editar", ['vendedor', 'comprador', 'administrador'])
         
         st.markdown("#### Permissões de Acesso")
         st.markdown("Defina as telas que este perfil poderá acessar:")
         
         col1, col2 = st.columns(2)
         
+        perfis_ref = db.reference('perfis')
+        perfil_atual = perfis_ref.child(perfil_selecionado).get() or {}
+        
         with col1:
-            permissoes = {}
-            permissoes_atuais = get_permissoes_perfil(perfil_selecionado)
-            
             st.markdown("##### Telas do Sistema")
-            permissoes['dashboard'] = st.toggle(
-                "📊 Dashboard",
-                value='dashboard' in permissoes_atuais,
-                key=f"perm_dashboard_{perfil_selecionado}"
-            )
-            permissoes['requisicoes'] = st.toggle(
-                "📝 Requisições",
-                value='requisicoes' in permissoes_atuais,
-                key=f"perm_requisicoes_{perfil_selecionado}"
-            )
-            permissoes['cotacoes'] = st.toggle(
-                "🛒 Cotações",
-                value='cotacoes' in permissoes_atuais,
-                key=f"perm_cotacoes_{perfil_selecionado}"
-            )
-            permissoes['importacao'] = st.toggle(
-                "✈️ Importação",
-                value='importacao' in permissoes_atuais,
-                key=f"perm_importacao_{perfil_selecionado}"
-            )
-            permissoes['configuracoes'] = st.toggle(
-                "⚙️ Configurações",
-                value='configuracoes' in permissoes_atuais,
-                key=f"perm_configuracoes_{perfil_selecionado}"
-            )
+            permissoes = {}
+            for tela, icone in [
+                ('dashboard', '📊 Dashboard'),
+                ('requisicoes', '📝 Requisições'),
+                ('cotacoes', '🛒 Cotações'),
+                ('importacao', '✈️ Importação'),
+                ('configuracoes', '⚙️ Configurações')
+            ]:
+                valor_padrao = True if tela in ['dashboard', 'requisicoes', 'cotacoes'] else False
+                key = f"{perfil_selecionado}_{tela}"
+                permissoes[tela] = st.toggle(
+                    icone,
+                    value=perfil_atual.get(tela, valor_padrao),
+                    key=key
+                )
         
         with col2:
             st.markdown("##### Permissões Administrativas")
-            permissoes['editar_usuarios'] = st.toggle(
-                "👥 Editar Usuários",
-                value='editar_usuarios' in permissoes_atuais,
-                key=f"perm_editar_usuarios_{perfil_selecionado}"
-            )
-            permissoes['excluir_usuarios'] = st.toggle(
-                "❌ Excluir Usuários",
-                value='excluir_usuarios' in permissoes_atuais,
-                key=f"perm_excluir_usuarios_{perfil_selecionado}"
-            )
-            permissoes['editar_perfis'] = st.toggle(
-                "🔑 Editar Perfis",
-                value='editar_perfis' in permissoes_atuais,
-                key=f"perm_editar_perfis_{perfil_selecionado}"
-            )
-
-        if st.button("💾 Salvar Permissões", type="primary"):
-            novas_permissoes = [k for k, v in permissoes.items() if v]
-            save_perfis_permissoes(perfil_selecionado, novas_permissoes)
-            st.success(f"Permissões do perfil {perfil_selecionado} atualizadas com sucesso!")
-            st.rerun()
-
-    # Seção de Sistema
-    elif st.session_state.get('config_modo') == 'sistema':
-        st.markdown("### Configurações do Sistema")
+            for permissao, icone in [
+                ('cadastrar_usuarios', '➕ Cadastrar Usuários'),
+                ('editar_usuarios', '👥 Editar Usuários'),
+                ('excluir_usuarios', '❌ Excluir Usuários'),
+                ('editar_perfis', '🔑 Editar Perfis')
+            ]:
+                valor_padrao = True if perfil_selecionado == 'administrador' else False
+                key = f"{perfil_selecionado}_{permissao}"
+                permissoes[permissao] = st.toggle(
+                    icone,
+                    value=perfil_atual.get(permissao, valor_padrao),
+                    key=key
+                )
         
-        # Se for administrador, mostra todas as abas
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("💾 Salvar Permissões", type="primary", use_container_width=True):
+                try:
+                    perfis_ref.child(perfil_selecionado).set(permissoes)
+                    st.success(f"Permissões do perfil {perfil_selecionado} atualizadas com sucesso!")
+                    time.sleep(1)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao salvar permissões: {str(e)}")
+            
+    # Seção de Sistema
+    if st.session_state.get('config_modo') == 'sistema':
+        st.markdown("### Configurações do Sistema")
+
         if st.session_state['perfil'] == 'administrador':
-            tab1, tab2, tab3, tab4 = st.tabs(["🔔 Notificações", "🎨 Cores", "📝 Fontes", "📐 Layout"])
-            
+            tab1, tab2 = st.tabs(["📊 Monitoramento", "🎨 Personalizar"])
+
             with tab1:
-                configurar_notificacoes()
-            
+                if permissoes.get('acessar_monitoramento', False):
+                    st.markdown("#### Monitoramento do Sistema")
+
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+                        st.markdown("##### Banco de Dados")
+                        try:
+                            requisicoes_ref = db.reference('requisicoes')
+                            total_requisicoes = len(requisicoes_ref.get() or {})
+
+                            st.metric("Total de Requisições", total_requisicoes)
+                            st.metric("Tamanho do Banco", "N/A para Firebase")
+                        except Exception as e:
+                            st.error(f"Erro ao acessar banco de dados: {str(e)}")
+
+                    st.markdown("##### Desempenho do Firebase")
+                    try:
+                        st.info("Funcionalidade em desenvolvimento")
+                    except Exception as e:
+                        st.error(f"Erro ao monitorar desempenho do Firebase: {str(e)}")
+
+                with col2:
+                    st.markdown("##### Gerenciamento de Backups")
+                    col_backup, col_import = st.columns(2)
+                    with col_backup:
+                        backup_dir = "backups"
+                        if not os.path.exists(backup_dir):
+                            os.makedirs(backup_dir)
+
+                        if st.button("💾 Backup Manual", type="primary"):
+                            try:
+                                all_data = db.reference().get()
+                                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                backup_file = f"{backup_dir}/backup_{timestamp}.json"
+
+                                with open(backup_file, 'w') as f:
+                                    json.dump(all_data, f, indent=4)
+
+                                st.success(f"Backup criado com sucesso: {backup_file}")
+                            except Exception as e:
+                                st.error(f"Erro ao criar backup: {str(e)}")
+
+                    with col_import:
+                        st.markdown("##### Importação de Backup")
+                        uploaded_file = st.file_uploader(
+                            "Selecione o arquivo de backup",
+                            type=['json'],
+                            help="Arquivos suportados: JSON"
+                        )
+
+                        if uploaded_file is not None:
+                            if st.button("📥 Restaurar Backup", type="primary"):
+                                try:
+                                    dados = json.loads(uploaded_file.getvalue().decode('utf-8'))
+                                    requisicoes_ref = db.reference('requisicoes')
+                                    for req in dados:
+                                        requisicoes_ref.child(str(req['numero'])).set(req)
+
+                                    st.success(f"Backup restaurado com sucesso! {len(dados)} requisições importadas.")
+                                    st.rerun()
+
+                                except Exception as e:
+                                    st.error(f"Erro na restauração: {str(e)}")
+
+                st.markdown("##### Backups Disponíveis")
+                backup_dir = "backups"
+                if os.path.exists(backup_dir):
+                    backup_files = [f for f in os.listdir(backup_dir) if f.endswith(('.zip', '.json', '.txt', '.py'))]
+
+                    if backup_files:
+                        backup_info = []
+                        for backup_file in backup_files:
+                            file_path = os.path.join(backup_dir, backup_file)
+                            file_size = os.path.getsize(file_path)
+                            creation_time = os.path.getctime(file_path)
+                            sp_tz = pytz.timezone('America/Sao_Paulo')
+                            creation_datetime = datetime.fromtimestamp(creation_time)
+                            creation_datetime = pytz.utc.localize(creation_datetime).astimezone(sp_tz)
+                            backup_info.append({
+                                'arquivo': backup_file,
+                                'caminho': file_path,
+                                'tamanho': file_size,
+                                'data_criacao': creation_datetime,
+                                'tipo': 'AUTOMÁTICO' if 'auto' in backup_file.lower() else 'MANUAL'
+                            })
+
+                        backup_info.sort(key=lambda x: x['data_criacao'], reverse=True)
+
+                        for backup in backup_info:
+                            col_arquivo, col_data, col_tamanho, col_download, col_excluir = st.columns([4, 3, 2, 1, 1])
+
+                            with col_arquivo:
+                                st.markdown(f"**{backup['arquivo']}**")
+                            with col_data:
+                                st.markdown(f"{backup['data_criacao'].strftime('%d/%m/%Y %H:%M:%S')}")
+                            with col_tamanho:
+                                tamanho_kb = backup['tamanho'] / 1024
+                                st.markdown(f"{tamanho_kb:.1f} KB")
+                            with col_download:
+                                with open(backup['caminho'], "rb") as f:
+                                    bytes_data = f.read()
+                                    st.download_button(
+                                        label="⬇️",
+                                        data=bytes_data,
+                                        file_name=backup['arquivo'],
+                                        mime="application/octet-stream",
+                                        key=f"download_{backup['arquivo']}"
+                                    )
+                            with col_excluir:
+                                if st.button("🗑️", key=f"delete_{backup['arquivo']}"):
+                                    try:
+                                        os.remove(backup['caminho'])
+                                        st.success("Backup removido com sucesso!")
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Erro ao remover backup: {str(e)}")
+
+                    else:
+                        st.info("Nenhum arquivo de backup encontrado.")
+
             with tab2:
-                st.markdown("#### Cores do Sistema")
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    cor_primaria = st.color_picker("Primária", "#2D2C74", key="cor_primaria")
-                    cor_texto = st.color_picker("Texto", "#000000", key="cor_texto")
-                with col2:
-                    cor_secundaria = st.color_picker("Secundária", "#1B81C5", key="cor_secundaria")
-                    cor_botoes = st.color_picker("Botões", "#2D2C74", key="cor_botoes")
-                with col3:
-                    cor_fundo = st.color_picker("Fundo", "#f8f9fa", key="cor_fundo")
-                    cor_campos = st.color_picker("Campos", "#ffffff", key="cor_campos")
+                if permissoes.get('acessar_personalizacao', False):
+                    st.write("#### Personalização do Tema")
 
-                st.markdown("#### Preview")
-                preview_html = f"""
-                    <div style="padding: 20px; border-radius: 10px; background-color: {cor_fundo};">
-                        <h4 style="color: {cor_texto};">Exemplo de Visualização</h4>
-                        <button style="background-color: {cor_botoes}; color: white; padding: 10px; border: none; border-radius: 5px; margin: 5px;">Botão</button>
-                        <input type="text" placeholder="Campo de texto" style="background-color: {cor_campos}; border: 1px solid {cor_secundaria}; padding: 5px; margin: 5px;">
-                    </div>
-                """
-                st.markdown(preview_html, unsafe_allow_html=True)
+                    if 'theme_config' not in st.session_state:
+                        st.session_state['theme_config'] = {
+                            'font_family': 'Arial',
+                            'font_size': 12,
+                            'primary_color': '#2D2C74',
+                            'background_color': '#FFFFFF',
+                            'text_color': '#000000'
+                        }
 
-            with tab3:
-                col1, col2 = st.columns(2)
-                with col1:
-                    familia_fonte = st.selectbox(
-                        "Fonte",
-                        ["Inter", "Roboto", "Open Sans", "Lato", "Montserrat"]
-                    )
-                    tamanho_fonte = st.number_input("Tamanho Base", min_value=12, max_value=20, value=16)
-                
-                with col2:
-                    st.markdown("#### Preview da Fonte")
-                    preview_font_html = f"""
-                        <div style="font-family: {familia_fonte}; font-size: {tamanho_fonte}px;">
-                            <p>Exemplo de texto com a fonte {familia_fonte}<br>
-                            ABCDEFGHIJKLMNOPQRSTUVWXYZ<br>
-                            abcdefghijklmnopqrstuvwxyz<br>
-                            0123456789</p>
-                        </div>
-                    """
-                    st.markdown(preview_font_html, unsafe_allow_html=True)
+                    # Estilos de letras
+                    font_family = st.selectbox("Estilo da Fonte", [
+                                                "Arial",
+                                                "Verdana",
+                                                "Times New Roman",
+                                                "Helvetica",
+                                                "Georgia",
+                                                "Courier New",
+                                                "Lucida Sans Unicode",
+                                                "Tahoma",
+                                                "Trebuchet MS",
+                                                "Impact",
+                                                "Comic Sans MS",
+                                                "Arial Black",
+                                                "Book Antiqua",
+                                                "Cambria",
+                                                "Didot",
+                                                "Garamond",
+                                                "Lucida Console",
+                                                "Palatino Linotype"
+                                            ],
+                                               index=[
+                                                    "Arial",
+                                                    "Verdana",
+                                                    "Times New Roman",
+                                                    "Helvetica",
+                                                    "Georgia",
+                                                    "Courier New",
+                                                    "Lucida Sans Unicode",
+                                                    "Tahoma",
+                                                    "Trebuchet MS",
+                                                    "Impact",
+                                                    "Comic Sans MS",
+                                                    "Arial Black",
+                                                    "Book Antiqua",
+                                                    "Cambria",
+                                                    "Didot",
+                                                    "Garamond",
+                                                    "Lucida Console",
+                                                    "Palatino Linotype"
+                                               ].index(st.session_state['theme_config'].get('font_family', 'Arial')),
+                                               key='font_family')
 
-            with tab4:
-                col1, col2 = st.columns(2)
-                with col1:
-                    largura_maxima = st.number_input("Largura Máxima", min_value=800, max_value=1600, value=1200, step=100)
-                    padding = st.number_input("Espaçamento", min_value=1, max_value=5, value=2)
-                    raio_borda = st.number_input("Raio da Borda", min_value=0, max_value=20, value=4)
-                
-                with col2:
-                    st.markdown("#### Preview do Layout")
-                    preview_layout = f"""
-                        <div style="max-width: {largura_maxima}px; padding: {padding * 10}px; background-color: {cor_fundo}; border-radius: {raio_borda}px;">
-                            <div style="background-color: {cor_secundaria}; padding: 10px; border-radius: {raio_borda}px; margin-bottom: 10px;">
-                                Elemento 1
-                            </div>
-                            <div style="background-color: {cor_secundaria}; padding: 10px; border-radius: {raio_borda}px;">
-                                Elemento 2
-                            </div>
-                        </div>
-                    """
-                    st.markdown(preview_layout, unsafe_allow_html=True)
+                    # Tamanho da fonte
+                    font_size = st.slider("Tamanho da Fonte", 10, 24,
+                                         st.session_state['theme_config'].get('font_size', 12),
+                                         key='font_size')
 
-            if st.button("💾 Salvar Configurações de Tema", type="primary"):
-                tema = {
-                    'cores': {
-                        'primaria': cor_primaria,
-                        'secundaria': cor_secundaria,
-                        'fundo': cor_fundo,
-                        'texto': cor_texto,
-                        'botoes': cor_botoes,
-                        'campos': cor_campos
-                    },
-                    'fonte': {
-                        'familia': familia_fonte,
-                        'tamanho': tamanho_fonte
-                    },
-                    'layout': {
-                        'largura_maxima': largura_maxima,
-                        'padding': padding,
-                        'raio_borda': raio_borda
-                    }
-                }
-                save_tema(tema)
-                st.success("Configurações de tema atualizadas com sucesso!")
-                st.rerun()
-        else:
-            # Para vendedores e compradores, mostra apenas notificações
-            tab1 = st.tabs(["🔔 Notificações"])[0]
-            with tab1:
-                configurar_notificacoes()
+                    # Cores do tema
+                    primary_color = st.color_picker("Cor Primária",
+                                                    st.session_state['theme_config'].get('primary_color', '#2D2C74'),
+                                                    key='primary_color')
+                    background_color = st.color_picker("Cor de Fundo",
+                                                        st.session_state['theme_config'].get('background_color',
+                                                                                             '#FFFFFF'),
+                                                        key='background_color')
+                    text_color = st.color_picker("Cor do Texto",
+                                                    st.session_state['theme_config'].get('text_color', '#000000'),
+                                                    key='text_color')
 
+                    # Aplica as configurações de estilo dinamicamente
+                    st.markdown(f"""
+                        <style>
+                        body {{
+                            font-family: {font_family};
+                            font-size: {font_size}px;
+                            color: {text_color};
+                            background-color: {background_color};
+                        }}
+                        :root {{
+                            --primary-color: {primary_color};
+                            --background-color: {background_color};
+                            --text-color: {text_color};
+                        }}
+                        </style>
+                    """, unsafe_allow_html=True)
+
+                    # Salvar as configurações
+                    if st.button("Salvar Personalização"):
+                        theme_config = {
+                            "font_family": font_family,
+                            "font_size": font_size,
+                            "primary_color": primary_color,
+                            "background_color": background_color,
+                            "text_color": text_color
+                        }
+                        st.session_state['theme_config'] = theme_config
+                        salvar_configuracoes()
+                        st.success("Personalização salva com sucesso!")
+                else:
+                    st.info("Você não tem permissão para acessar esta tela.")
+                    
 def main():
-    init_notification_js()
-    
-    # Adiciona atualização automática a cada 30 segundos
-    st_autorefresh(interval=30000, key="datarefresh")
-    
     if 'usuario' not in st.session_state:
         tela_login()
     else:
-        solicitar_permissao_notificacao()
-        
-        # Adicione aqui a mensagem fixa
+        # Adiciona a mensagem fixa
         col1, col2 = st.columns([3,1])
         with col2:
             st.markdown(f"""
@@ -2107,21 +2517,25 @@ def main():
                     🔄 Última atualização: {get_data_hora_brasil()}
                 </div>
             """, unsafe_allow_html=True)
-       
+        
         menu = menu_lateral()
         
-        if menu == "Dashboard":
+        permissoes = get_permissoes_perfil(st.session_state.get('perfil', 'vendedor'))
+        
+        if menu == "Dashboard" and permissoes.get('dashboard', False):
             dashboard()
-        elif menu == "Requisições":
+        elif menu == "Requisições" and permissoes.get('requisicoes', False):
             requisicoes()
-        elif menu == "Cotações":
+        elif menu == "Cotações" and permissoes.get('cotacoes', False):
             st.title("Cotações")
             st.info("Funcionalidade em desenvolvimento")
-        elif menu == "Importação":
+        elif menu == "Importação" and permissoes.get('importacao', False):
             st.title("Importação")
             st.info("Funcionalidade em desenvolvimento")
-        elif menu == "Configurações":
+        elif menu == "Configurações" and permissoes.get('configuracoes', False):
             configuracoes()
+        else:
+            st.error("Você não tem permissão para acessar esta tela.")
 
 if __name__ == "__main__":
     main()
