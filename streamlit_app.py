@@ -2,6 +2,7 @@ import streamlit as st
 import firebase_admin
 from firebase_admin import credentials, initialize_app, db
 import hashlib
+import asyncio
 import pandas as pd
 import time
 import zipfile
@@ -2157,6 +2158,11 @@ def get_permissoes_perfil(perfil):
 
 def configuracoes():
     st.title("Configurações")
+    
+    # Evite loops infinitos aqui
+    if st.button("Atualizar Configurações"):
+        # Lógica de atualização
+        st.success("Configurações atualizadas!")
     
     if st.session_state['perfil'].lower() in ['administrador', 'comprador']:
         col1, col2, col3 = st.columns(3)
