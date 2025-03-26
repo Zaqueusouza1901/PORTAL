@@ -48,15 +48,7 @@ async def carregar_dados():
 if st.button("Carregar Dados"):
     dados = asyncio.run(carregar_dados())
     st.write(dados)
-
-@st.cache_data
-def carregar_dados_firebase():
-    # Lógica para carregar dados do Firebase
-    return dados
-
-dados = carregar_dados_firebase()
-st.write(dados)
-
+    
 def verificar_conexao():
     try:
         ref = db.reference('.info/connected')
