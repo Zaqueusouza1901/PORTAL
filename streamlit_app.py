@@ -40,6 +40,15 @@ def inicializar_firebase():
 if not inicializar_firebase():
     st.stop()
 
+async def carregar_dados():
+    # Simula uma operação assíncrona
+    await asyncio.sleep(2)
+    return {"dados": "carregados"}
+
+if st.button("Carregar Dados"):
+    dados = asyncio.run(carregar_dados())
+    st.write(dados)
+    
 def verificar_conexao():
     try:
         ref = db.reference('.info/connected')
