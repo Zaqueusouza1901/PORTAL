@@ -23,18 +23,6 @@ import shutil
 import glob
 from streamlit_autorefresh import st_autorefresh
 
-# Atualização automática a cada 1 hora (3600000 ms)
-if 'ultima_atualizacao' not in st.session_state:
-    st.session_state['ultima_atualizacao'] = time.time()
-
-if time.time() - st.session_state['ultima_atualizacao'] > 3600:  # 1 hora
-    st.session_state.requisicoes = carregar_requisicoes()
-    st.session_state['ultima_atualizacao'] = time.time()
-    st.rerun()
-
-# Use o st_autorefresh apenas quando necessário e configure corretamente
-st_autorefresh(interval=3600000, key="backup_refresh")  # Atualiza a cada 1 hora
-
 def inicializar_firebase():
     try:
         if not firebase_admin._apps:
