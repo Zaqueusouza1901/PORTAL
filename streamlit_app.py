@@ -1,6 +1,7 @@
 import streamlit as st
 import sqlite3
 import hashlib
+import firebase_admin
 import pandas as pd
 import time
 import zipfile
@@ -17,8 +18,36 @@ from email.mime.multipart import MIMEMultipart
 import plotly.graph_objects as go
 import shutil
 import glob
+import locale
 from streamlit_autorefresh import st_autorefresh
+from firebase_admin import credentials, db
+from email.mime.base import MIMEBase
+from email import encoders
 
+BACKUP_CONFIG = {
+    'frequencia': 'diario',  # diario, horario, personalizado
+    'hora': '18:00',  # Para backups diários
+    'intervalo_horas': 1,  # Para backups horários
+    'dias_semana': [0, 1, 2, 3, 4],  # 0=segunda, 6=domingo
+    'enviar_email': True,
+    'email_destino': 'Importacao@jetfrio.com.br',
+    'ultimo_backup': None
+}
+
+def carregar_config_backup():
+    try:
+        with open('config_backup.json', 'r') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        # Se o arquivo não existir, cria com valores padrão
+        with open('config_backup.json', 'w') as f:
+            json.dump(BACKUP_CONFIG, f)
+        return BACKUP_CONFIG.copy()
+
+def salvar_config_backup(config):
+    with open('config_backup.json', 'w') as f:
+        json.dump(config, f)
+        
 def gerar_hash_senha(senha):
     return hashlib.sha256(senha.encode()).hexdigest()
 
@@ -69,12 +98,40 @@ def inicializar_sistema():
                 migrar_usuarios_json_para_sqlite()
         
         # Executar backup automático diário
-        timestamp = datetime.now().strftime('%Y%m%d')
+        timestamp = datetime.now().strftime('%d%m%Y')
         backup_path = f'backups/backup_{timestamp}.zip'
         
         # Verifica se já existe backup do dia
         if not os.path.exists(backup_path):
             backup_automatico()
+            
+        # Verificar se é hora de enviar o backup por email (18h)
+        fuso_brasil = pytz.timezone('America/Sao_Paulo')
+        hora_atual = datetime.now(fuso_brasil).hour
+        minuto_atual = datetime.now(fuso_brasil).minute
+        
+        # Arquivo para controlar o último envio
+        ultimo_envio_file = 'ultimo_envio_backup.txt'
+        hoje = datetime.now(fuso_brasil).strftime('%Y-%m-%d')
+        
+        # Verifica se é 18h e ainda não foi enviado hoje
+        if hora_atual == 18 and minuto_atual < 5:  # Janela de 5 minutos para evitar múltiplos envios
+            enviar_hoje = True
+            
+            if os.path.exists(ultimo_envio_file):
+                with open(ultimo_envio_file, 'r') as f:
+                    ultimo_envio = f.read().strip()
+                if ultimo_envio == hoje:
+                    enviar_hoje = False
+            
+            if enviar_hoje:
+                if os.path.exists(backup_path):
+                    if enviar_backup_por_email(backup_path):
+                        # Registrar o envio
+                        with open(ultimo_envio_file, 'w') as f:
+                            f.write(hoje)
+                else:
+                    logging.error(f"Arquivo de backup não encontrado para envio: {backup_path}")
             
         # Limpar backups antigos
         limpar_backups_antigos('backups')
@@ -82,6 +139,7 @@ def inicializar_sistema():
         return True
     except Exception as e:
         st.error(f"Erro na inicialização do sistema: {str(e)}")
+        logging.error(f"Erro na inicialização do sistema: {str(e)}")
         return False
 
 def migrar_usuarios_json_para_sqlite():
@@ -298,6 +356,85 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+def enviar_backup_por_email(backup_path, destinatario):
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = EMAIL_CONFIG['EMAIL']
+        msg['To'] = destinatario
+        msg['Subject'] = f"Backup Automático - Portal Jetfrio - {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+        
+        corpo_email = f"""
+        <html>
+            <body>
+                <h2>Backup Automático do Sistema</h2>
+                <p>Segue em anexo o backup automático gerado em {get_data_hora_brasil()}</p>
+                <p><strong>Sistema:</strong> Portal Jetfrio</p>
+                <p><strong>Tamanho do arquivo:</strong> {os.path.getsize(backup_path) / (1024 * 1024):.2f} MB</p>
+                <p>Este é um email automático, por favor não responda.</p>
+            </body>
+        </html>
+        """
+        
+        msg.attach(MIMEText(corpo_email, 'html'))
+        
+        # Anexar o arquivo de backup
+        with open(backup_path, 'rb') as f:
+            anexo = MIMEBase('application', 'octet-stream')
+            anexo.set_payload(f.read())
+            encoders.encode_base64(anexo)
+            anexo.add_header('Content-Disposition', 'attachment', filename=os.path.basename(backup_path))
+            msg.attach(anexo)
+        
+        # Enviar o email
+        with smtplib.SMTP(EMAIL_CONFIG['SMTP_SERVER'], EMAIL_CONFIG['SMTP_PORT']) as server:
+            server.starttls()
+            server.login(EMAIL_CONFIG['EMAIL'], EMAIL_CONFIG['PASSWORD'])
+            server.send_message(msg)
+        
+        return True
+    except Exception as e:
+        st.error(f"Erro ao enviar backup por email: {str(e)}")
+        return False
+
+def verificar_backup_automatico():
+    try:
+        config_backup = carregar_config_backup()
+        agora = datetime.now()
+        ultimo_backup = config_backup.get('ultimo_backup')
+        
+        # Se nunca foi feito backup, faz agora
+        if not ultimo_backup:
+            backup_automatico()
+            return
+        
+        # Converter para objeto datetime se for string
+        if isinstance(ultimo_backup, str):
+            try:
+                ultimo_backup = datetime.strptime(ultimo_backup, '%H:%M:%S - %d/%m/%Y')
+            except:
+                ultimo_backup = None
+        
+        # Verificar frequência configurada
+        if config_backup['frequencia'] == 'diario':
+            hora_backup = datetime.strptime(config_backup['hora'], '%H:%M').time()
+            if agora.time() >= hora_backup and (not ultimo_backup or ultimo_backup.date() < agora.date()):
+                backup_automatico()
+        
+        elif config_backup['frequencia'] == 'horario':
+            intervalo = timedelta(hours=config_backup['intervalo_horas'])
+            if not ultimo_backup or (agora - ultimo_backup) >= intervalo:
+                backup_automatico()
+        
+        elif config_backup['frequencia'] == 'personalizado':
+            dia_semana = agora.weekday()
+            if dia_semana in config_backup['dias_semana']:
+                hora_backup = datetime.strptime(config_backup['hora'], '%H:%M').time()
+                if agora.time() >= hora_backup and (not ultimo_backup or ultimo_backup.date() < agora.date()):
+                    backup_automatico()
+    
+    except Exception as e:
+        logging.error(f"Erro na verificação de backup automático: {str(e)}")
+
 def save_perfis_permissoes(perfil, permissoes):
     try:
         try:
@@ -319,8 +456,6 @@ def save_perfis_permissoes(perfil, permissoes):
         st.error(f"Erro ao salvar permissões: {str(e)}")
         return False
 
-
-
 def verificar_diretorios():
     diretorios = ['database', 'backups']
     for dir in diretorios:
@@ -333,7 +468,7 @@ def verificar_diretorios():
     return True
 
 def importar_dados_antigos():
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')  # Definir timestamp no início da função
+    timestamp = datetime.now().strftime('%d%m%Y_%H%M%S')  # Definir timestamp no início da função
     try:
         # Verificar maior número atual antes da importação
         conn = sqlite3.connect('database/requisicoes.db')
@@ -570,7 +705,7 @@ def renumerar_requisicoes():
 
 def backup_requisicoes():
     try:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%d%m%Y_%H%M%S")
         backup_file = f'backup/requisicoes_backup_{timestamp}.json'
         os.makedirs('backup', exist_ok=True)
         
@@ -598,11 +733,14 @@ def verificar_conteudo_backup(arquivo_backup):
 
 def backup_automatico(dados=None):
     try:
+        # Carrega configurações de backup
+        config_backup = carregar_config_backup()
+        
         # Criar diretório de backup se não existir
         backup_dir = 'backups/'
         os.makedirs(backup_dir, exist_ok=True)
         
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        timestamp = datetime.now().strftime('%d%m%Y_%H%M%S')
         
         # Definir arquivos para backup
         arquivos_backup = {
@@ -614,32 +752,44 @@ def backup_automatico(dados=None):
             'ultimo_numero': 'ultimo_numero.json'
         }
         
-        backup_file = os.path.join(backup_dir, f'backup_{timestamp}.zip')
+        backup_file = os.path.join(backup_dir, f'backup_{timestamp}.json')
         
-        # Criar arquivo ZIP com todos os backups
-        with zipfile.ZipFile(backup_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for nome, arquivo in arquivos_backup.items():
-                if os.path.exists(arquivo):
-                    zipf.write(arquivo, os.path.basename(arquivo))
+        # Criar arquivo JSON com todos os dados
+        dados_backup = {}
+        for nome, arquivo in arquivos_backup.items():
+            if os.path.exists(arquivo):
+                if arquivo.endswith('.db'):
+                    conn = sqlite3.connect(arquivo)
+                    cursor = conn.cursor()
+                    cursor.execute(f"SELECT * FROM {nome.split('_')[0]}")
+                    dados = cursor.fetchall()
+                    colunas = [desc[0] for desc in cursor.description]
+                    dados_backup[nome] = {
+                        'colunas': colunas,
+                        'dados': dados
+                    }
+                    conn.close()
+                else:
+                    with open(arquivo, 'r', encoding='utf-8') as f:
+                        dados_backup[nome] = json.load(f)
         
-        # Comprimir o backup
-        comprimir_backup(backup_file)
+        # Salvar o backup em JSON
+        with open(backup_file, 'w', encoding='utf-8') as f:
+            json.dump(dados_backup, f, ensure_ascii=False, indent=4)
         
-        # Verificar integridade e conteúdo do backup
-        if verificar_integridade_db() and verificar_conteudo_backup(f"{backup_file}.gz"):
-            logging.info(f"Backup realizado com sucesso e integridade verificada: {backup_file}.gz")
-        else:
-            logging.error("Problemas detectados no backup. Verificação necessária.")
-            return None, 0
+        # Enviar por email se configurado
+        if config_backup.get('enviar_email', False):
+            enviar_backup_por_email(backup_file, config_backup['email_destino'])
         
-        # Limpar backups antigos
-        limpar_backups_antigos(backup_dir)
+        # Atualizar último backup
+        config_backup['ultimo_backup'] = get_data_hora_brasil()
+        salvar_config_backup(config_backup)
         
-        return f"{backup_file}.gz", os.path.getsize(f"{backup_file}.gz")
+        return backup_file, os.path.getsize(backup_file)
     except Exception as e:
         logging.error(f"Erro ao realizar backup: {str(e)}")
         return None, 0
-
+    
 def comprimir_backup(backup_path):
     with open(backup_path, 'rb') as f_in:
         with gzip.open(f'{backup_path}.gz', 'wb') as f_out:
@@ -760,7 +910,7 @@ def restaurar_backup():
         ultimo_numero_atual = cursor.fetchone()[0] or 4999
         
         # Fazer backup preventivo antes de limpar
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        timestamp = datetime.now().strftime('%d%m%dY_%H%M%S')
         shutil.copy2('database/requisicoes.db', f'backups/pre_restore_{timestamp}.db')
         
         # Limpa tabela atual
@@ -1133,7 +1283,7 @@ def dashboard():
     
     # Definição dos ícones e cores dos status com transparência
     status_config = {
-        'ABERTA': {'icon': '📋', 'cor': 'rgba(46, 204, 113, 0.7)'},  # Verde
+        'ABERTA': {'icon': '🗒️', 'cor': 'rgba(46, 204, 113, 0.7)'},  # Verde
         'EM ANDAMENTO': {'icon': '⏳', 'cor': 'rgba(241, 196, 15, 0.7)'},  # Amarelo
         'FINALIZADA': {'icon': '✅', 'cor': 'rgba(52, 152, 219, 0.7)'},  # Azul
         'RECUSADA': {'icon': '🚫', 'cor': 'rgba(231, 76, 60, 0.7)'},  # Vermelho
@@ -1645,6 +1795,14 @@ def salvar_configuracoes():
 def requisicoes():
     st.title("REQUISIÇÕES")
     
+    # Configurações de cores mais saturadas
+    status_config = {
+        'ABERTA': {'icon': '🗒️', 'color': 'rgba(46, 204, 113, 0.3)', 'border': '#2ecc71'},
+        'EM ANDAMENTO': {'icon': '⏳', 'color': 'rgba(241, 196, 15, 0.3)', 'border': '#f39c12'},
+        'FINALIZADA': {'icon': '✅', 'color': 'rgba(52, 152, 219, 0.3)', 'border': '#3498db'},
+        'RECUSADA': {'icon': '❌', 'color': 'rgba(231, 76, 60, 0.3)', 'border': '#e74c3c'}
+    }
+
     # Atualização automática
     if 'ultima_atualizacao' not in st.session_state:
         st.session_state.ultima_atualizacao = time.time()
@@ -1653,6 +1811,12 @@ def requisicoes():
         st.session_state.requisicoes = carregar_requisicoes()
         st.session_state.ultima_atualizacao = time.time()
         st.rerun()
+
+    # Inicializar paginação
+    if 'pagina_atual' not in st.session_state:
+        st.session_state.pagina_atual = 1
+    if 'itens_por_pagina' not in st.session_state:
+        st.session_state.itens_por_pagina = 10
 
     # Estilização
     st.markdown("""
@@ -1665,11 +1829,12 @@ def requisicoes():
             margin-bottom: 12px;
         }
         .requisicao-card {
-            background-color: white;
+            background-color: #fff9c4;
+            color: #000000;
             padding: 4px;
             border-radius: 8px;
             margin-bottom: 4px;
-            border-left: 4px solid #2D2C74;
+            border-left: 4px solid;
             transition: all 0.3s ease;
         }
         .requisicao-card.expandido {
@@ -1699,12 +1864,16 @@ def requisicoes():
             border-radius: 12px;
             font-size: 12px;
             font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
         }
         .status-aberta { background-color: #e3f2fd; color: #1976d2; }
         .status-andamento { background-color: #fff3e0; color: #f57c00; }
         .status-finalizada { background-color: #e8f5e9; color: #2e7d32; }
         .status-recusada { background-color: #ffebee; color: #c62828; }
         .requisicao-info {
+            color: #000000;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -1812,6 +1981,34 @@ def requisicoes():
             background-color: #c62828 !important;
             color: white !important;
         }
+        .paginacao-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+            margin-top: 20px;
+            padding: 12px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+        }
+        .item-resposta {
+            background-color: #f0f8ff;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 5px 0;
+        }
+        .resposta-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .justificativa-box {
+            background-color: #ffebee;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
         </style>
     """, unsafe_allow_html=True)
     
@@ -1836,359 +2033,309 @@ def requisicoes():
             with col2:
                 cliente_busca = st.text_input("👥 CLIENTE", key="busca_cliente")
             with col3:
-                data_col1, data_col2 = st.columns(2)
-                with data_col1:
-                    data_inicial = st.date_input("DATA INICIAL", value=None, key="data_inicial")
-                with data_col2:
-                    data_final = st.date_input("DATA FINAL", value=None, key="data_final")
+                produto_busca = st.text_input("📦 PRODUTO", key="busca_produto")
             with col4:
                 st.markdown("<br>", unsafe_allow_html=True)
                 buscar = st.button("🔎 BUSCAR", type="primary", use_container_width=True)
 
-            # Status como chips coloridos
-            status_opcoes = {
-                "ABERTA": "🔵",
-                "EM ANDAMENTO": "🟡",
-                "FINALIZADA": "🟢",
-                "RECUSADA": "🔴"
-            }
-            selected_status = st.multiselect(
-                "STATUS",
-                options=list(status_opcoes.keys()),
-                default=["ABERTA", "EM ANDAMENTO"] if st.session_state['perfil'] != 'vendedor' else list(status_opcoes.keys()),
-                format_func=lambda x: f"{status_opcoes[x]} {x}"
-            )
+            # Segunda linha de filtros
+            col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
+            with col1:
+                status_opcoes = {
+                    "ABERTA": "🗒️ ABERTA",
+                    "EM ANDAMENTO": "⏳ EM ANDAMENTO",
+                    "FINALIZADA": "✅ FINALIZADA",
+                    "RECUSADA": "❌ RECUSADA"
+                }
+                selected_status = st.multiselect(
+                    "STATUS",
+                    options=list(status_opcoes.keys()),
+                    default=["ABERTA", "EM ANDAMENTO"] if st.session_state['perfil'] != 'vendedor' else list(status_opcoes.keys()),
+                    format_func=lambda x: status_opcoes[x]
+                )
+            with col2:
+                data_inicial = st.date_input("📅 DE", value=None, key="data_inicial")
+            with col3:
+                data_final = st.date_input("📅 ATÉ", value=None, key="data_final")
+            with col4:
+                if st.button("🔄 LIMPAR", type="secondary", use_container_width=True):
+                    st.session_state.pagina_atual = 1
+                    st.rerun()
+            
             st.markdown('</div>', unsafe_allow_html=True)
 
         # Lógica de filtragem e exibição
         requisicoes_visiveis = []
         if st.session_state['perfil'] == 'vendedor':
-            requisicoes_visiveis = [req for req in st.session_state.requisicoes if req['vendedor'] == st.session_state['usuario']]
+            requisicoes_visiveis = [r for r in st.session_state.requisicoes if r['vendedor'] == st.session_state['usuario']]
+            st.info(f"Visualizando requisições do vendedor: {st.session_state['usuario']}")
         else:
-            requisicoes_visiveis = st.session_state.requisicoes.copy()
+            requisicoes_visiveis = st.session_state.requisicoes
 
         # Aplicar filtros
-        if buscar:
-            if numero_busca:
-                requisicoes_visiveis = [req for req in requisicoes_visiveis if str(numero_busca) in str(req['numero'])]
-            if cliente_busca:
-                requisicoes_visiveis = [req for req in requisicoes_visiveis if cliente_busca.upper() in req['cliente'].upper()]
-            if data_inicial and data_final:
-                data_inicial_str = data_inicial.strftime('%d/%m/%Y')
-                data_final_str = data_final.strftime('%d/%m/%Y')
-                requisicoes_visiveis = [req for req in requisicoes_visiveis if data_inicial_str <= req['data_hora'].split()[0] <= data_final_str]
+        if numero_busca:
+            requisicoes_visiveis = [r for r in requisicoes_visiveis if str(numero_busca) in str(r['numero'])]
+        if cliente_busca:
+            requisicoes_visiveis = [r for r in requisicoes_visiveis if cliente_busca.upper() in r['cliente'].upper()]
+        if produto_busca:
+            requisicoes_visiveis = [r for r in requisicoes_visiveis 
+                                  if any(produto_busca.upper() in item.get('descricao', '').upper() 
+                                        or produto_busca.upper() in item.get('codigo', '').upper()
+                                        for item in r['items'])]
+        if data_inicial and data_final:
+            data_inicial_str = data_inicial.strftime('%d/%m/%Y')
+            data_final_str = data_final.strftime('%d/%m/%Y')
+            requisicoes_visiveis = [r for r in requisicoes_visiveis if data_inicial_str <= r['data_hora'].split()[0] <= data_final_str]
 
-        if not requisicoes_visiveis:
-            st.warning("NENHUMA REQUISIÇÃO ENCONTRADA COM OS FILTROS SELECIONADOS.")
+        # Filtro de status
+        requisicoes_visiveis = [r for r in requisicoes_visiveis if r['status'] in selected_status]
 
         # Ordenação por número em ordem decrescente
         requisicoes_visiveis.sort(key=lambda x: x['numero'], reverse=True)
 
-        # Exibição das requisições
-        for idx, req in enumerate(requisicoes_visiveis):
-            if req['status'] in selected_status:
+        # Paginação
+        total_paginas = max(1, (len(requisicoes_visiveis) + st.session_state.itens_por_pagina - 1) // st.session_state.itens_por_pagina)
+        inicio = (st.session_state.pagina_atual - 1) * st.session_state.itens_por_pagina
+        fim = min(inicio + st.session_state.itens_por_pagina, len(requisicoes_visiveis))
+        requisicoes_paginadas = requisicoes_visiveis[inicio:fim]
+
+        # Exibição das requisições paginadas
+        for req in requisicoes_paginadas:
+            with st.form(key=f"form_{req['numero']}"):  # Envolve cada requisição em um form
+                status_info = status_config.get(req['status'], {})
                 st.markdown(f"""
-                    <div class="requisicao-card" style="background-color: {
-                        'rgba(46, 204, 113, 0.2)' if req['status'] == 'ABERTA'
-                        else 'rgba(241, 196, 15, 0.2)' if req['status'] == 'EM ANDAMENTO'
-                        else 'rgba(52, 152, 219, 0.2)' if req['status'] == 'FINALIZADA'
-                        else 'rgba(231, 76, 60, 0.2)' if req['status'] == 'RECUSADA'
-                        else 'var(--background-color)'};
-                        color: var(--text-color)">
-                        <div class="requisicao-info" style="color: var(--text-color)">
+                    <div class="requisicao-card" style="border-left-color: {status_info.get('border', '#2D2C74')}; 
+                                                      background-color: {status_info.get('color', 'white')}">
+                        <div class="requisicao-info">
                             <div>
-                                <span class="requisicao-numero" style="color: var(--text-color)"></span>
-                                <span class="requisicao-numero" style="color: var(--text-color)">{req['numero']}</span>
-                                <span class="requisicao-cliente" style="color: var(--text-color)">{req['cliente']}</span>
+                                <span class="requisicao-numero">{req['numero']}</span>
+                                <span class="requisicao-cliente">{req['cliente']}</span>
                             </div>
                             <div>
-                                <span class="status-badge status-{req['status'].lower()}">{req['status']}</span>
+                                <span class="status-badge" style="background-color: {status_info.get('color', '#f8f9fa')}; 
+                                                                  border: 1px solid {status_info.get('border', '#ddd')};">
+                                    {status_info.get('icon', '')} {req['status']}
+                                </span>
                             </div>
                         </div>
-                        <div class="requisicao-data" style="color: var(--text-color); display: flex; justify-content: space-between;">
+                        <div class="requisicao-data" style="display: flex; justify-content: space-between;">
                             <div>
-                                <span>CRIADO EM: {req['data_hora']}</span>
-                                <span>VENDEDOR: {req['vendedor']}</span>
+                                <span>📅 {req['data_hora'].split()[0]}</span>
+                                <span style="margin-left: 15px;">🕒 {req['data_hora'].split()[1]}</span>
+                                <span style="margin-left: 15px;">👤 {req['vendedor']}</span>
                             </div>
-                            <span>COMPRADOR: {req.get('comprador_responsavel', '-')}
+                            <span>👥 {req.get('comprador_responsavel', '-')}</span>
                         </div>
                     </div>
                 """, unsafe_allow_html=True)
 
-                if st.button(f"VER DETALHES", key=f"detalhes_{req['numero']}_{idx}"):
-                    for key in list(st.session_state.keys()):
-                        if key.startswith('mostrar_detalhes_') and key != f'mostrar_detalhes_{req["numero"]}':
-                            st.session_state.pop(key)
-                    st.session_state[f'mostrar_detalhes_{req["numero"]}'] = True
+                is_open = st.session_state.get(f'mostrar_detalhes_{req["numero"]}', False)
+                if st.form_submit_button(
+                    f"🔽 DETALHES" if is_open else f"▶️ DETALHES",
+                    help="Clique para expandir/recolher"
+                ):
+                    st.session_state[f'mostrar_detalhes_{req["numero"]}'] = not is_open
                     st.rerun()
 
-                if st.session_state.get(f'mostrar_detalhes_{req["numero"]}', False):
-                    with st.container():
-                        st.markdown("""
-                            <div class="detalhes-container" style="
-                                background-color: var(--background-color);
-                                color: var(--text-color) !important;
-                                border: 1px solid var(--secondary-background-color);">
-                        """, unsafe_allow_html=True)
-                        
-                        st.markdown("""
-                            <div class="detalhes-header" style="
-                                background-color: var(--background-color);
-                                color: var(--text-color) !important;
-                                border-bottom: 1px solid var(--secondary-background-color);">
-                        """, unsafe_allow_html=True)
-                        
-                        if req['status'] == 'ABERTA' and st.session_state['perfil'] in ['comprador', 'administrador']:
-                            col1, col2, col3, col4 = st.columns([2,1,1,1])
-                            with col2:
-                                if st.button("✅", key=f"aceitar_{req['numero']}", type="primary"):
-                                    req['status'] = 'EM ANDAMENTO'
-                                    req['comprador_responsavel'] = st.session_state['usuario']
-                                    req['data_hora_aceite'] = get_data_hora_brasil()
-                                    if salvar_requisicao(req):
-                                        st.success("Requisição aceita com sucesso!")
-                                        st.rerun()
-                            with col3:
-                                if st.button("❌", key=f"recusar_{req['numero']}", type="primary"):
-                                    st.session_state[f'mostrar_justificativa_{req["numero"]}'] = True
-                                    st.rerun()
-                            with col4:
-                                if st.button("FECHAR", key=f"fechar_{req['numero']}_{idx}"):
-                                    st.session_state.pop(f'mostrar_detalhes_{req["numero"]}')
-                                    st.rerun()
-                        else:
-                            col1, col2 = st.columns([3,1])
-                            with col2:
-                                if st.button("FECHAR", key=f"fechar_{req['numero']}_{idx}"):
-                                    st.session_state.pop(f'mostrar_detalhes_{req["numero"]}')
-                                    st.rerun()
-                        st.markdown('</div>', unsafe_allow_html=True)
+            if st.session_state.get(f'mostrar_detalhes_{req["numero"]}', False):
+                with st.container():
+                    st.markdown("""
+                        <div class="detalhes-container">
+                    """, unsafe_allow_html=True)
 
+                    # Cabeçalho com informações e botão FINALIZAR
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
                         st.markdown(f"""
-                            <div class="header-info" style="
-                                background-color: var(--background-color);
-                                color: var(--text-color) !important;
-                                border-bottom: 1px solid var(--secondary-background-color);">
+                            <div class="header-info">
                                 <div class="header-group">
-                                    <p style="color: var(--text-color) !important"><strong style="color: var(--text-color) !important">CRIADO EM:</strong> {req['data_hora']}</p>
-                                    <p style="color: var(--text-color) !important"><strong style="color: var(--text-color) !important">VENDEDOR:</strong> {req['vendedor']}</p>
+                                    <p><strong>CRIADO EM:</strong> {req['data_hora']}</p>
+                                    <p><strong>VENDEDOR:</strong> {req['vendedor']}</p>
                                 </div>
                                 <div class="header-group">
-                                    <p style="color: var(--text-color) !important"><strong style="color: var(--text-color) !important">RESPONDIDO EM:</strong> {req.get('data_hora_resposta','-')}</p>
-                                    <p style="color: var(--text-color) !important"><strong style="color: var(--text-color) !important">COMPRADOR:</strong> {req.get('comprador_responsavel', '-')}</p>
+                                    <p><strong>RESPONDIDO EM:</strong> {req.get('data_hora_resposta','-')}</p>
+                                    <p><strong>COMPRADOR:</strong> {req.get('comprador_responsavel', '-')}</p>
                                 </div>
                             </div>
                         """, unsafe_allow_html=True)
-
-                         # Campo de justificativa (aparece somente após clicar em recusar)
-                        if st.session_state.get(f'mostrar_justificativa_{req["numero"]}', False):
-                            st.markdown("### JUSTIFICATIVA DA RECUSA")
-                            justificativa = st.text_area(
-                                "Digite a justificativa da recusa",
-                                key=f"justificativa_{req['numero']}",
-                                height=100
-                            )
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                if st.button("CONFIRMAR RECUSA", key=f"confirmar_recusa_{req['numero']}", type="primary", use_container_width=True):
-                                    if not justificativa:
-                                        st.error("Por favor, informe a justificativa da recusa.")
-                                        return
-                                    
-                                    req['status'] = 'RECUSADA'
-                                    req['comprador_responsavel'] = st.session_state['usuario']
-                                    req['data_hora_resposta'] = get_data_hora_brasil()
-                                    req['justificativa_recusa'] = justificativa
-                                    
-                                    if salvar_requisicao(req):
-                                        try:
-                                            enviar_email_requisicao(req, "recusada")
-                                            st.success("Requisição recusada com sucesso!")
-                                            st.rerun()
-                                        except Exception as e:
-                                            st.error(f"Erro ao enviar notificação: {str(e)}")
-                                    
-                            with col2:
-                                if st.button("CANCELAR", key=f"cancelar_recusa_{req['numero']}", type="secondary", use_container_width=True):
-                                    st.session_state.pop(f'mostrar_justificativa_{req["numero"]}')
+                    
+                    with col2:
+                        if req['status'] == 'EM ANDAMENTO' and st.session_state['perfil'].lower() in ['comprador', 'administrador']:
+                            # Container com margem negativa para alinhar à direita
+                            st.markdown("""
+                                <div style="display: flex; justify-content: flex-end; margin-right: -20px;">
+                            """, unsafe_allow_html=True)
+                            if st.button("✅ FINALIZAR", 
+                                      key=f"finalizar_{req['numero']}",
+                                      help="Concluir esta requisição (não será mais editável)"):
+                                req['status'] = 'FINALIZADA'
+                                req['data_hora_finalizacao'] = get_data_hora_brasil()
+                                if salvar_requisicao(req):
+                                    st.success(f"Requisição {req['numero']} finalizada com sucesso!")
                                     st.rerun()
+                            st.markdown("</div>", unsafe_allow_html=True)
 
-                        # Itens da requisição
-                        st.markdown('<div class="items-title">ITENS DA REQUISIÇÃO</div>', unsafe_allow_html=True)
-                        if req['items']:
-                            items_df = pd.DataFrame([{
-                                'Código': item.get('codigo', '-'),
-                                'Cód. Fabricante': item.get('cod_fabricante', '-'),
-                                'Descrição': item['descricao'],
-                                'Marca': item.get('marca', 'PC'),
-                                'QTD': item['quantidade'],
-                                'R$ Venda Unit': f"R$ {item.get('venda_unit', 0):.2f}",
-                                'R$ Total': f"R$ {(item.get('venda_unit', 0) * item['quantidade']):.2f}",
-                                'Prazo': item.get('prazo_entrega', '-')
-                            } for item in req['items']])
+                    # Exibir itens da requisição
+                    if req.get('items'):
+                        # Botões de aceitar ou recusar (somente para compradores/admins quando status for ABERTA)
+                        if req['status'] == 'ABERTA' and st.session_state['perfil'].lower() in ['comprador', 'administrador']:
+                            col1, col2 = st.columns([1, 1])
+                            with col1:
+                                if st.button("✅ ACEITAR", key=f"aceitar_{req['numero']}"):
+                                    req['status'] = 'EM ANDAMENTO'
+                                    req['comprador_responsavel'] = st.session_state['usuario']
+                                    req['data_hora_aceite'] = get_data_hora_brasil()
+                                    st.session_state[f'mostrar_responder_{req["numero"]}'] = True
+                                    if salvar_requisicao(req):
+                                        st.success(f"Requisição {req['numero']} aceita com sucesso!")
+                                        st.rerun()
+                            with col2:
+                                if st.button("❌ RECUSAR", key=f"recusar_{req['numero']}"):
+                                    st.session_state[f'mostrar_justificativa_{req["numero"]}'] = True
 
-                            st.dataframe(
-                                items_df,
-                                hide_index=True,
-                                use_container_width=True,
-                                column_config={
-                                    "Código": st.column_config.TextColumn("CÓDIGO", width=35),
-                                    "Cód. Fabricante": st.column_config.TextColumn("CÓD. FABRICANTE", width=100),
-                                    "Descrição": st.column_config.TextColumn("DESCRIÇÃO", width=350),
-                                    "Marca": st.column_config.TextColumn("MARCA", width=80),
-                                    "QTD": st.column_config.NumberColumn("QTD", width=30),
-                                    "R$ Venda Unit": st.column_config.TextColumn("R$ VENDA UNIT", width=70),
-                                    "R$ Total": st.column_config.TextColumn("R$ TOTAL", width=80),
-                                    "Prazo": st.column_config.TextColumn("PRAZO", width=100)
-                                }
-                            )
+                        # Exibir tabela de itens
+                        items_df = pd.DataFrame([{
+                            'ITEM': i + 1,
+                            'Código': item.get('codigo', '-'),
+                            'Cód. Fabricante': item.get('cod_fabricante', '-'),
+                            'Descrição': item.get('descricao', '-'),
+                            'Marca': item.get('marca', '-'),
+                            'QTD': item.get('quantidade', 0),
+                            'R$ Venda Unit': f"R$ {item.get('custo_unit', 0) * (1 + item.get('markup', 0) / 100):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'),
+                            'R$ Total': f"R$ {item.get('custo_unit', 0) * (1 + item.get('markup', 0) / 100) * item.get('quantidade', 0):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'),
+                            'Prazo': item.get('prazo_entrega', '-'),
+                        } for i, item in enumerate(req['items'])])
 
-                            # Exibição das observações do vendedor
-                            if req.get('observacoes_vendedor'):
-                                st.markdown("""
-                                    <div style='background-color: var(--background-color);
-                                              border-radius: 4px; 
-                                              padding: 10px; 
-                                              margin: 10px 0 0px 0; 
-                                              border-left: 4px solid #1B81C5;
-                                              border: 1px solid var(--secondary-background-color);'>
-                                        <p style='color: var(--text-color); 
-                                                  font-weight: bold; 
-                                                  margin-bottom: 10px;'>OBSERVAÇÕES DO VENDEDOR:</p>
-                                        <p style='margin: 0 0 5px 0; color: var(--text-color);'>{}</p>
-                                    </div>
-                                """.format(req['observacoes_vendedor']), unsafe_allow_html=True)
+                        st.dataframe(
+                            items_df,
+                            use_container_width=True,
+                            column_config={
+                                "ITEM": st.column_config.TextColumn('ITEM', width='small'),
+                                "Código": st.column_config.TextColumn('CÓDIGO', width='medium'),
+                                "Cód. Fabricante": st.column_config.TextColumn('CÓD. FABRICANTE', width='medium'),
+                                "Descrição": st.column_config.TextColumn('DESCRIÇÃO', width='large'),
+                                "Marca": st.column_config.TextColumn('MARCA', width='small'),
+                                "QTD": st.column_config.NumberColumn('QUANTIDADE', width='small'),
+                                "R$ Venda Unit": st.column_config.TextColumn('R$ VENDA UNIT', width='medium'),
+                                "R$ Total": st.column_config.TextColumn('R$ TOTAL', width='medium'),
+                                "Prazo": st.column_config.TextColumn('PRAZO', width='medium')
+                            }
+                        )
 
-                            # Exibição da justificativa de recusa
-                            if req['status'] == 'RECUSADA':
-                                st.markdown("""
-                                    <div style='
-                                        background-color: rgba(198, 40, 40, 0.1);
-                                        padding: 15px;
-                                        border-radius: 8px;
-                                        margin: 10px 0;
-                                        border: 1px solid rgba(198, 40, 40, 0.3);
-                                        box-shadow: 0 2px 4px rgba(198, 40, 40, 0.1);'>
-                                        <p style='
-                                            color: rgb(198, 40, 40);
-                                            font-weight: bold;
-                                            margin-bottom: 5px;
-                                            font-size: 14px;'>
-                                            JUSTIFICATIVA DA RECUSA:
-                                        </p>
-                                        <p style='
-                                            margin: 0;
-                                            color: rgb(198, 40, 40);
-                                            opacity: 0.9;'>
-                                            {}
-                                        </p>
-                                    </div>
-                                """.format(req.get('justificativa_recusa', 'Não informada')), unsafe_allow_html=True)
+                        # Exibir observações do vendedor se existirem
+                        if req.get('observacoes_vendedor'):
+                            st.markdown(f"""
+                                <div style="margin-top: 0.5cm;"></div>
+                                <div class="observacao-box">
+                                    <strong>Observações do Vendedor:</strong><br>
+                                    {req['observacoes_vendedor']}
+                                </div>
+                            """, unsafe_allow_html=True)
+                        
+                        # Exibir observações do comprador se existirem
+                        observacoes_comprador = [f"<b>Item {i+1}:</b> {item.get('observacoes', '')}" 
+                                               for i, item in enumerate(req['items']) if item.get('observacoes')]
+                        if observacoes_comprador:
+                            st.markdown(f"""
+                                <div style="margin-top: 0.5cm;"></div>
+                                <div class="observacao-box" style="background-color: #f0f8ff;">
+                                    <strong>Observações do Comprador:</strong><br>
+                                    {"<br>".join(observacoes_comprador)}
+                                </div>
+                            """, unsafe_allow_html=True)
+                        
+                        st.markdown("""<div style="margin-bottom: 1cm;"></div>""", unsafe_allow_html=True)
 
-                            # Exibição da observação do comprador
-                            if req.get('observacao_geral'):
-                                st.markdown("""
-                                    <div style='background-color: var(--background-color);
-                                              border-radius: 4px; 
-                                              padding: 15px; 
-                                              margin: 20px 0 25px 0; 
-                                              border-left: 4px solid #2D2C74;
-                                              border: 1px solid var(--secondary-background-color);'>
-                                        <p style='color: var(--text-color); 
-                                                  font-weight: bold; 
-                                                  margin-bottom: 10px;'>OBSERVAÇÕES DO COMPRADOR:</p>
-                                        <p style='margin: 0 0 5px 0; color: var(--text-color);'>{}</p>
-                                    </div>
-                                """.format(req['observacao_geral']), unsafe_allow_html=True)
-
-                            if req['status'] == 'EM ANDAMENTO' and st.session_state['perfil'] in ['comprador', 'administrador']:
-                                st.markdown('<div class="input-container">', unsafe_allow_html=True)
-                                
-                                # Seleção do item para resposta
-                                item_selecionado = st.selectbox(
-                                    "SELECIONE O ITEM PARA RESPONDER",
-                                    options=[f"ITEM {item['item']}: {item['descricao']}" for item in req['items']],
-                                    key=f"select_item_{req['numero']}"
-                                )
-                                
-                                # Índice do item selecionado
-                                item_idx = int(item_selecionado.split(':')[0].replace('ITEM ', '')) - 1
-                                item = req['items'][item_idx]
-
-                                # Campos de resposta em linha única
+                    # Campos para responder itens (aparece ao aceitar ou em andamento)
+                    if req["status"] == "EM ANDAMENTO":
+                        for i, item in enumerate(req["items"]):
+                            with st.expander(f"ITEM {i + 1}: {item['descricao']}"):
                                 col1, col2, col3 = st.columns(3)
                                 with col1:
-                                    custo_str = st.text_input(
-                                        "R$ UNIT",
-                                        value=f"{item.get('custo_unit', 0.0):,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'),
-                                        key=f"custo_{req['numero']}_{item_idx}"
-                                    )
-                                    # Converte o valor digitado para float
+                                    custo_input = st.text_input("R$ UNIT", value=f"{item.get('custo_unit', 0):,.2f}".replace('.', ','), key=f"custo_unit_{req['numero']}_{i}")
                                     try:
-                                        custo_str = custo_str.replace('.', '').replace(',', '.')
-                                        item['custo_unit'] = float(custo_str)
+                                        item["custo_unit"] = float(custo_input.replace('.', '').replace(',', '.'))
                                     except ValueError:
-                                        item['custo_unit'] = 0.0
-                                        
+                                        pass
                                 with col2:
-                                    item['markup'] = st.number_input(
-                                        "% MARKUP",
-                                        value=item.get('markup', 0.0),
-                                        min_value=0.0,
-                                        format="%.0f",
-                                        step=1.0,
-                                        key=f"markup_{req['numero']}_{item_idx}"
-                                    )
+                                    markup_input = st.number_input("% MARKUP", value=int(item.get("markup", 0)), step=1, format="%d", key=f"markup_{req['numero']}_{i}")
+                                    item["markup"] = markup_input
                                 with col3:
-                                    item['prazo_entrega'] = st.text_input(
-                                        "PRAZO",
-                                        value=item.get('prazo_entrega', ''),
-                                        key=f"prazo_{req['numero']}_{item_idx}"
-                                    )
+                                    item["prazo_entrega"] = st.text_input("PRAZO", value=item.get("prazo_entrega", ""), key=f"prazo_{req['numero']}_{i}")
 
-                                # Cálculo automático quando custo e markup são preenchidos
-                                if item['custo_unit'] > 0 and item['markup'] > 0:
-                                    item['venda_unit'] = item['custo_unit'] * (1 + (item['markup'] / 100))
-                                    item['venda_total'] = item['venda_unit'] * item['quantidade']
-                                    item['salvo'] = True
+                                incluir_obs = st.checkbox("INCLUIR OBSERVAÇÕES", key=f"incluir_obs_{req['numero']}_{i}")
+                                if incluir_obs:
+                                    item["observacoes"] = st.text_area("Observações do Comprador", value=item.get("observacoes", ""), key=f"obs_{req['numero']}_{i}")
+
+                                if st.button(f"SALVAR ITEM {i + 1}", key=f"salvar_item_{req['numero']}_{i}"):
                                     salvar_requisicao(req)
+                                    st.success(f"Item {i + 1} salvo com sucesso!")
 
-                                # Checkbox e campo para observações
-                                mostrar_obs = st.checkbox(
-                                    "INCLUIR OBSERVAÇÕES",
-                                    key=f"show_obs_{req['numero']}"
-                                )
-                                observacao_geral = ""
-                                if mostrar_obs:
-                                    observacao_geral = st.text_area(
-                                        "OBSERVAÇÕES GERAIS",
-                                        value=req.get('observacao_geral', ''),
-                                        height=100,
-                                        key=f"obs_{req['numero']}"
-                                    )
-
-                                # Botões alinhados horizontalmente
-                                col_btn1, col_btn2 = st.columns(2)
-                                with col_btn1:
-                                    if st.button("💾 SALVAR ITEM", key=f"salvar_{req['numero']}_{item_idx}", type="primary"):
-                                        if mostrar_obs:
-                                            req['observacao_geral'] = observacao_geral
-                                        salvar_requisicao(req)
-                                        st.success(f"ITEM {item['item']} SALVO COM SUCESSO!")
+                    # Campo de justificativa para recusa
+                    if st.session_state.get(f'mostrar_justificativa_{req["numero"]}', False):
+                        justificativa = st.text_area(
+                            "Digite o motivo da recusa",
+                            key=f"justificativa_recusa_{req['numero']}"
+                        )
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button(f"CONFIRMAR RECUSA {req['numero']}", key=f"confirmar_recusa_{req['numero']}"):
+                                if not justificativa.strip():
+                                    st.error("Por favor, informe o motivo da recusa.")
+                                else:
+                                    req['status'] = 'RECUSADA'
+                                    req['justificativa_recusa'] = justificativa
+                                    req['comprador_responsavel'] = st.session_state['usuario']
+                                    req['data_hora_resposta'] = get_data_hora_brasil()
+                                    if salvar_requisicao(req):
+                                        st.success(f"Requisição {req['numero']} recusada com sucesso!")
                                         st.rerun()
-                                
-                                with col_btn2:
-                                    todos_itens_salvos = all(item.get('salvo', False) for item in req['items'])
-                                    if todos_itens_salvos:
-                                        if st.button("✅ FINALIZAR", key=f"finalizar_{req['numero']}", type="primary"):
-                                            req['status'] = 'FINALIZADA'
-                                            req['data_hora_resposta'] = get_data_hora_brasil()
-                                            if salvar_requisicao(req):
-                                                enviar_email_requisicao(req, "finalizada")
-                                                st.success("REQUISIÇÃO FINALIZADA COM SUCESSO!")
-                                                st.rerun()
-                                            else:
-                                                st.error("ERRO AO SALVAR A REQUISIÇÃO. TENTE NOVAMENTE.")
+                
+                        with col2:
+                            if st.button("CANCELAR", key=f"cancelar_recusa_{req['numero']}"):
+                                st.session_state.pop(f'mostrar_justificativa_{req["numero"]}')
+                                st.rerun()
+
+        # Controles de paginação
+        if len(requisicoes_visiveis) > 0:
+            with st.container():
+                st.markdown('<div class="paginacao-container">', unsafe_allow_html=True)
+                
+                col1, col2, col3, col4, col5 = st.columns([1,1,2,1,1])
+                
+                with col1:
+                    novo_valor = st.selectbox(
+                        "Itens por página:",
+                        [10, 25, 50],
+                        index=[10, 25, 50].index(st.session_state.itens_por_pagina),
+                        key="itens_por_pagina_select"
+                    )
+                    if novo_valor != st.session_state.itens_por_pagina:
+                        st.session_state.itens_por_pagina = novo_valor
+                        st.session_state.pagina_atual = 1
+                        st.rerun()
+                
+                with col2:
+                    if st.session_state.pagina_atual > 1:
+                        if st.button("⏮️ Anterior", key="anterior"):
+                            st.session_state.pagina_atual -= 1
+                            st.rerun()
+                
+                with col3:
+                    st.markdown(f"**📄 Página {st.session_state.pagina_atual} de {total_paginas}**", unsafe_allow_html=True)
+                
+                with col4:
+                    if st.session_state.pagina_atual < total_paginas:
+                        if st.button("Próximo ⏭️", key="proximo"):
+                            st.session_state.pagina_atual += 1
+                            st.rerun()
+                
+                with col5:
+                    st.markdown(f"**📊 Total: {len(requisicoes_visiveis)} requisições**", unsafe_allow_html=True)
+                
+                st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            st.warning("NENHUMA REQUISIÇÃO ENCONTRADA COM OS FILTROS SELECIONADOS.")
 
 def get_permissoes_perfil(perfil):
     permissoes_padrao = {
@@ -2465,8 +2612,65 @@ def configuracoes():
             with tab1:
                 st.markdown("#### Monitoramento do Sistema")
                 
-                col1, col2 = st.columns(2)
+                # Configuração de Backups Automáticos
+                st.markdown("##### Configuração de Backups Automáticos")
+                config_backup = carregar_config_backup()
                 
+                col1, col2 = st.columns(2)
+                with col1:
+                    frequencia = st.selectbox(
+                        "Frequência do Backup",
+                        ["diario", "horario", "personalizado"],
+                        index=["diario", "horario", "personalizado"].index(config_backup['frequencia']),
+                        format_func=lambda x: {
+                            "diario": "Diário",
+                            "horario": "Horário",
+                            "personalizado": "Personalizado"
+                        }[x]
+                    )
+                    
+                    if frequencia == "diario":
+                        hora = st.time_input("Hora do backup diário", value=datetime.strptime(config_backup['hora'], '%H:%M').time())
+                        config_backup['hora'] = hora.strftime('%H:%M')
+                    
+                    elif frequencia == "horario":
+                        intervalo = st.number_input("Intervalo em horas", min_value=1, max_value=24, value=config_backup['intervalo_horas'])
+                        config_backup['intervalo_horas'] = intervalo
+                    
+                    elif frequencia == "personalizado":
+                        dias_semana = st.multiselect(
+                            "Dias da semana",
+                            options=["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"],
+                            default=[["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"][i] for i in config_backup['dias_semana']]
+                        )
+                        config_backup['dias_semana'] = [["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"].index(d) for d in dias_semana]
+                        hora = st.time_input("Hora do backup", value=datetime.strptime(config_backup['hora'], '%H:%M').time())
+                        config_backup['hora'] = hora.strftime('%H:%M')
+                
+                with col2:
+                    enviar_email = st.checkbox("Enviar backup por email", value=config_backup['enviar_email'])
+                    config_backup['enviar_email'] = enviar_email
+                    
+                    email_destino = st.text_input("Email destino", value=config_backup['email_destino'])
+                    config_backup['email_destino'] = email_destino
+                    
+                    if st.button("💾 Salvar Configurações", type="primary"):
+                        config_backup['frequencia'] = frequencia
+                        salvar_config_backup(config_backup)
+                        st.success("Configurações de backup salvas com sucesso!")
+                    
+                    if config_backup.get('ultimo_backup'):
+                        st.markdown(f"**Último backup:** {config_backup['ultimo_backup']}")
+                    else:
+                        st.markdown("**Nenhum backup automático realizado ainda**")
+                    
+                    if st.button("🔄 Executar Backup Agora", type="secondary"):
+                        backup_automatico()
+                        st.success("Backup executado com sucesso!")
+                        st.rerun()
+                
+                # Banco de Dados e Importação (mantido igual)
+                col1, col2 = st.columns(2)
                 with col1:
                     st.markdown("##### Banco de Dados")
                     try:
@@ -2543,6 +2747,7 @@ def configuracoes():
                                 if os.path.exists('backups/pre_restore.db'):
                                     shutil.copy2('backups/pre_restore.db', 'database/requisicoes.db')
                 
+                # Visualização de Dados e Backup Manual (mantido igual)
                 st.markdown("#### Visualização de Dados")
                 if st.button("🔍 Visualizar Dados do Banco", type="primary"):
                     try:
@@ -2559,14 +2764,12 @@ def configuracoes():
                         if not os.path.exists(backup_dir):
                             os.makedirs(backup_dir)
                         
-                        # Usar timezone de São Paulo para o timestamp
                         sp_tz = pytz.timezone('America/Sao_Paulo')
-                        timestamp = datetime.now(sp_tz).strftime("%Y%m%d_%H%M%S")
+                        timestamp = datetime.now(sp_tz).strftime("%d%m%Y_%H%M%S")
                         
                         conn = sqlite3.connect('database/requisicoes.db')
                         df = pd.read_sql_query("SELECT * FROM requisicoes", conn)
                         
-                        # Salvar como JSON
                         backup_filename = f'backup_manual_{timestamp}.json'
                         with open(f'{backup_dir}/{backup_filename}', 'w', encoding='utf-8') as f:
                             json.dump(df.to_dict('records'), f, ensure_ascii=False, indent=2)
@@ -2576,21 +2779,19 @@ def configuracoes():
                     except Exception as e:
                         st.error(f"Erro ao criar backup: {str(e)}")
                 
-                # Lista de Backups
+                # Lista de Backups (mantido igual)
                 st.markdown("#### Backups Disponíveis")
                 backup_dir = "backups"
                 if os.path.exists(backup_dir):
                     backup_files = [f for f in os.listdir(backup_dir) if f.endswith(('.zip', '.json', '.txt', '.py'))]
                     
                     if backup_files:
-                        # Organiza os backups por data de criação (mais recente primeiro)
                         backup_info = []
                         for backup_file in backup_files:
                             file_path = os.path.join(backup_dir, backup_file)
                             file_size = os.path.getsize(file_path)
                             creation_time = os.path.getctime(file_path)
                             
-                            # Converter para timezone de São Paulo
                             sp_tz = pytz.timezone('America/Sao_Paulo')
                             creation_datetime = datetime.fromtimestamp(creation_time)
                             creation_datetime = pytz.utc.localize(creation_datetime).astimezone(sp_tz)
@@ -2602,7 +2803,6 @@ def configuracoes():
                                 'data_criacao': creation_datetime
                             })
                         
-                        # Ordena por data de criação (mais recente primeiro)
                         backup_info.sort(key=lambda x: x['data_criacao'], reverse=True)
                         
                         for backup in backup_info:
@@ -2612,16 +2812,13 @@ def configuracoes():
                                 st.text(backup['arquivo'])
                             
                             with col2:
-                                # Formata a data e hora no timezone de São Paulo
                                 st.text(backup['data_criacao'].strftime('%d/%m/%Y %H:%M:%S'))
                             
                             with col3:
-                                # Identifica se é backup automático ou manual
                                 tipo = 'AUTOMÁTICO' if 'auto' in backup['arquivo'].lower() else 'MANUAL'
                                 st.text(tipo)
                             
                             with col4:
-                                # Formata o tamanho do arquivo
                                 if backup['tamanho'] < 1024:
                                     tamanho_fmt = f"{backup['tamanho']} B"
                                 elif backup['tamanho'] < 1024**2:
@@ -2659,8 +2856,14 @@ def main():
     # Inicializar o banco de dados
     inicializar_banco()
     
-    # Adiciona atualização automática a cada 120 segundos
-    st_autorefresh(interval=3600000, key="backup_refresh")
+    # Carregar configurações de backup
+    carregar_config_backup()
+    
+    # Adiciona atualização automática a cada 1 minuto para verificar backups
+    st_autorefresh(interval=60000, key="backup_refresh")
+    
+    # Verificar se precisa fazer backup automático
+    verificar_backup_automatico()
     
     if 'usuario' not in st.session_state:
         tela_login()
