@@ -1,6 +1,6 @@
 import streamlit as st
 import firebase_admin
-from firebase_admin import credentials, db
+from firebase_admin import credentials, initialize_app, db
 import hashlib
 import pandas as pd
 import time
