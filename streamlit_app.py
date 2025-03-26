@@ -1187,7 +1187,6 @@ def tela_login():
                         time.sleep(1)
                         st.rerun()
 
-
 def menu_lateral():
     with st.sidebar:
         st.markdown("""
@@ -1248,17 +1247,14 @@ def menu_lateral():
         st.markdown("### Menu")
         st.markdown("---")
         
-        # Obter permissões do usuário atual
         perfil_atual = st.session_state.get('perfil', 'vendedor')
         permissoes = st.session_state.get('perfis', {}).get(perfil_atual, {})
         
-        # Se não tiver permissões carregadas, carregar as padrão
         if not permissoes:
             permissoes = get_permissoes_perfil(perfil_atual)
             st.session_state.perfis = st.session_state.get('perfis', {})
             st.session_state.perfis[perfil_atual] = permissoes
         
-        # Criar itens do menu baseado nas permissões
         menu_items = []
         
         if permissoes.get('dashboard', True):
@@ -2365,33 +2361,34 @@ def get_permissoes_perfil(perfil):
             'requisicoes': True,
             'cotacoes': True,
             'importacao': False,
-            'configuracoes': False,
-            'editar_usuarios': False,
-            'excluir_usuarios': False,
-            'editar_perfis': False
+            'configuracoes': False
         },
         'comprador': {
             'dashboard': True,
             'requisicoes': True,
             'cotacoes': True,
             'importacao': True,
-            'configuracoes': False,
-            'editar_usuarios': False,
-            'excluir_usuarios': False,
-            'editar_perfis': False
+            'configuracoes': False
         },
         'administrador': {
             'dashboard': True,
             'requisicoes': True,
             'cotacoes': True,
             'importacao': True,
-            'configuracoes': True,
+            'configuracoes': True
+        }
+    }
+    
+    # Se tem acesso a configurações, tem todas as permissões administrativas
+    permissoes = permissoes_padrao.get(perfil, permissoes_padrao['vendedor'])
+    if permissoes.get('configuracoes', False):
+        permissoes.update({
             'editar_usuarios': True,
             'excluir_usuarios': True,
             'editar_perfis': True
-        }
-    }
-    return permissoes_padrao.get(perfil, permissoes_padrao['vendedor'])
+        })
+    
+    return permissoes
 
 def configuracoes():
     st.title("Configurações")
@@ -2585,7 +2582,14 @@ def configuracoes():
                 ('importacao', '✈️ Importação'),
                 ('configuracoes', '⚙️ Configurações')
             ]:
-                valor_padrao = True if tela in ['dashboard', 'requisicoes', 'cotacoes'] else False
+                # Valores padrão baseados no perfil
+                if perfil_selecionado == 'administrador':
+                    valor_padrao = True
+                elif perfil_selecionado == 'comprador':
+                    valor_padrao = True if tela in ['dashboard', 'requisicoes', 'cotacoes', 'importacao'] else False
+                else:  # vendedor
+                    valor_padrao = True if tela in ['dashboard', 'requisicoes', 'cotacoes'] else False
+                
                 key = f"{perfil_selecionado}_{tela}"
                 permissoes[tela] = st.toggle(
                     icone,
@@ -2594,19 +2598,18 @@ def configuracoes():
                 )
         
         with col2:
-            st.markdown("##### Permissões Administrativas")
-            for permissao, icone in [
-                ('editar_usuarios', '👥 Editar Usuários'),
-                ('excluir_usuarios', '❌ Excluir Usuários'),
-                ('editar_perfis', '🔑 Editar Perfis')
-            ]:
-                valor_padrao = True if perfil_selecionado == 'administrador' else False
-                key = f"{perfil_selecionado}_{permissao}"
-                permissoes[permissao] = st.toggle(
-                    icone,
-                    value=st.session_state.get('perfis', {}).get(perfil_selecionado, {}).get(permissao, valor_padrao),
-                    key=key
-                )
+            st.markdown("##### Observações")
+            st.info("""
+            - Acesso à tela **Configurações** concede permissão total a todas as funções administrativas
+            - Perfil **Administrador** tem acesso completo por padrão
+            - Perfil **Comprador** pode ter acesso completo se habilitado
+            """)
+            
+            # Mostrar status atual das permissões administrativas
+            if permissoes.get('configuracoes', False):
+                st.success("✅ Este perfil tem acesso COMPLETO a todas as funções administrativas")
+            else:
+                st.warning("⚠️ Este perfil NÃO tem acesso às funções administrativas")
         
         col1, col2 = st.columns(2)
         with col1:
@@ -2614,6 +2617,14 @@ def configuracoes():
                 try:
                     if 'perfis' not in st.session_state:
                         st.session_state.perfis = {}
+                    
+                    # Se tem acesso a configurações, concede todas as permissões administrativas
+                    if permissoes.get('configuracoes', False):
+                        permissoes.update({
+                            'editar_usuarios': True,
+                            'excluir_usuarios': True,
+                            'editar_perfis': True
+                        })
                     
                     st.session_state.perfis[perfil_selecionado] = permissoes
                     save_perfis_permissoes(perfil_selecionado, permissoes)
