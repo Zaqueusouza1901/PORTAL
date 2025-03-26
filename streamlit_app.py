@@ -23,24 +23,13 @@ import glob
 from streamlit_autorefresh import st_autorefresh
 
 def inicializar_firebase():
-    max_tentativas = 3
-    tentativa = 0
-    while tentativa < max_tentativas:
-        try:
-            if not firebase_admin._apps:
-                # Carregar credenciais do secrets.toml
-                cred = credentials.Certificate(st.secrets["FIREBASE_CREDENTIALS"])
-                initialize_app(cred, {
-                    'databaseURL': 'https://portal-26466-default-rtdb.firebaseio.com'
-                })
-            return True
-        except Exception as e:
-            tentativa += 1
-            time.sleep(2 ** tentativa)  # Backoff exponencial
-    st.error(f"Falha crítica na conexão após {max_tentativas} tentativas")
-    return False
+    if not firebase_admin._apps:
+        cred = credentials.Certificate(st.secrets["FIREBASE_CREDENTIALS"])
+        initialize_app(cred, {
+            'databaseURL': 'https://portal-26466-default-rtdb.firebaseio.com'
+        })
+    return True
 
-# Chamada IMEDIATA após a definição da função
 if not inicializar_firebase():
     st.stop()
 
