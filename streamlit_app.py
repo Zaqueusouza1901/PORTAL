@@ -21,7 +21,6 @@ import plotly.graph_objects as go
 import shutil
 import glob
 from streamlit_autorefresh import st_autorefresh
-from firebase_admin import credentials, initialize_app
 
 def inicializar_firebase():
     max_tentativas = 3
