@@ -262,45 +262,62 @@ def enviar_email_requisicao(requisicao, tipo_notificacao):
         if comprador_email:
             msg['Cc'] = comprador_email
         
-        # Cria tabela HTML dos itens
+        # Formata a data/hora de criação e resposta
+        data_criacao = requisicao['data_hora'].split(' - ')
+        data_resposta = requisicao.get('data_hora_resposta', '').split(' - ') if requisicao.get('data_hora_resposta') else ['', '']
+        
+        # Cria o corpo do email em HTML
         html = f"""
         <html>
-            <body>
-                <h2>Requisição #{requisicao['numero']}</h2>
-                <p><strong>Cliente:</strong> {requisicao['cliente']}</p>
-                <p><strong>Status:</strong> {requisicao['status']}</p>
+            <body style="font-family: Arial, sans-serif;">
+                <div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px;">
+                    <h2 style="color: #2D2C74;">SUA REQUISIÇÃO Nº{requisicao['numero']} FOI {tipo_notificacao.upper()}</h2>
+                    <p><strong>Jetfrio Alerta</strong></p>
+                    <p>Para: {requisicao['vendedor']}</p>
+                    <p>Cc: {requisicao.get('comprador_responsavel', '')}</p>
+                </div>
+                
+                <div style="margin-top: 20px;">
+                    <p><strong>Requisição #{requisicao['numero']}</strong></p>
+                    <p><strong>Cliente:</strong> {requisicao['cliente']}</p>
+                    <p><strong>Status:</strong> {requisicao['status']}</p>
+                </div>
                 
                 <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 10px 0;">
                     <p><strong>Criado por:</strong> {requisicao['vendedor']}</p>
-                    <p><strong>Data/Hora Criação:</strong> {requisicao['data_hora']}</p>
+                    <p><strong>Data/Hora Criação:</strong> {data_criacao[1]} {data_criacao[0]}</p>
                     <p><strong>Respondido por:</strong> {requisicao.get('comprador_responsavel', '-')}</p>
-                    <p><strong>Data/Hora Resposta:</strong> {requisicao.get('data_hora_resposta', '-')}</p>
+                    <p><strong>Data/Hora Resposta:</strong> {data_resposta[1]} {data_resposta[0] if data_resposta[0] else '-'}</p>
                 </div>
 
-                <table border="1" style="border-collapse: collapse; width: 100%;">
-                    <tr>
-                        <th>Item</th>
-                        <th>Código</th>
-                        <th>Descrição</th>
-                        <th>Marca</th>
-                        <th>Qtd</th>
-                        <th>Valor Unit.</th>
-                        <th>Total</th>
-                        <th>Prazo</th>
+                <table border="1" style="border-collapse: collapse; width: 100%; margin-top: 15px;">
+                    <tr style="background-color: #2D2C74; color: white;">
+                        <th style="padding: 8px; text-align: center;">Item</th>
+                        <th style="padding: 8px; text-align: center;">Código</th>
+                        <th style="padding: 8px; text-align: center;">Descrição</th>
+                        <th style="padding: 8px; text-align: center;">Marca</th>
+                        <th style="padding: 8px; text-align: center;">Qtd</th>
+                        <th style="padding: 8px; text-align: center;">Valor Unit.</th>
+                        <th style="padding: 8px; text-align: center;">Total</th>
+                        <th style="padding: 8px; text-align: center;">Prazo</th>
                     </tr>
         """
         
         for item in requisicao['items']:
+            # Formata os valores monetários
+            venda_unit = item.get('venda_unit', 0)
+            total = venda_unit * item['quantidade']
+            
             html += f"""
                 <tr>
-                    <td>{item['item']}</td>
-                    <td>{item['codigo']}</td>
-                    <td>{item['descricao']}</td>
-                    <td>{item['marca']}</td>
-                    <td>{item['quantidade']}</td>
-                    <td>R$ {item.get('venda_unit', 0):.2f}</td>
-                    <td>R$ {item.get('venda_unit', 0) * item['quantidade']:.2f}</td>
-                    <td>{item.get('prazo_entrega', '-')}</td>
+                    <td style="padding: 8px; text-align: center;">{item['item']}</td>
+                    <td style="padding: 8px; text-align: center;">{item['codigo']}</td>
+                    <td style="padding: 8px; text-align: left;">{item['descricao']}</td>
+                    <td style="padding: 8px; text-align: center;">{item['marca']}</td>
+                    <td style="padding: 8px; text-align: center;">{item['quantidade']}</td>
+                    <td style="padding: 8px; text-align: right;">R$ {venda_unit:,.2f}</td>
+                    <td style="padding: 8px; text-align: right;">R$ {total:,.2f}</td>
+                    <td style="padding: 8px; text-align: center;">{item.get('prazo_entrega', '-')}</td>
                 </tr>
             """
         
@@ -308,11 +325,20 @@ def enviar_email_requisicao(requisicao, tipo_notificacao):
                 </table>
         """
 
-        # Adiciona observações se existirem
+        # Adiciona observações do vendedor se existirem
+        if requisicao.get('observacoes_vendedor'):
+            html += f"""
+                <div style="margin-top: 20px; padding: 15px; background-color: #e9f7fe; border-left: 4px solid #2D2C74;">
+                    <h3 style="margin-top: 0; color: #2D2C74;">Observações do Vendedor:</h3>
+                    <p style="margin-bottom: 0;">{requisicao['observacoes_vendedor']}</p>
+                </div>
+            """
+
+        # Adiciona observações do comprador se existirem
         if requisicao.get('observacao_geral'):
             html += f"""
-                <div style="margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-left: 4px solid #2D2C74;">
-                    <h3 style="margin-top: 0; color: #2D2C74;">Observações do Comprador:</h3>
+                <div style="margin-top: 20px; padding: 15px; background-color: #e8f5e9; border-left: 4px solid #4CAF50;">
+                    <h3 style="margin-top: 0; color: #4CAF50;">Observações do Comprador:</h3>
                     <p style="margin-bottom: 0;">{requisicao['observacao_geral']}</p>
                 </div>
             """
@@ -320,13 +346,16 @@ def enviar_email_requisicao(requisicao, tipo_notificacao):
         # Adiciona justificativa de recusa se existir
         if tipo_notificacao.upper() == 'RECUSADA' and requisicao.get('justificativa_recusa'):
             html += f"""
-                <div style="margin-top: 20px; padding: 15px; background-color: #ffebee; border-left: 4px solid #c62828;">
-                    <h3 style="margin-top: 0; color: #c62828;">Justificativa da Recusa:</h3>
+                <div style="margin-top: 20px; padding: 15px; background-color: #ffebee; border-left: 4px solid #f44336;">
+                    <h3 style="margin-top: 0; color: #f44336;">Justificativa da Recusa:</h3>
                     <p style="margin-bottom: 0;">{requisicao['justificativa_recusa']}</p>
                 </div>
             """
 
         html += """
+                <div style="margin-top: 20px; font-size: 12px; color: #777;">
+                    <p>Este é um email automático, por favor não responda.</p>
+                </div>
             </body>
         </html>
         """
@@ -2188,7 +2217,11 @@ def requisicoes():
                                 req['status'] = 'FINALIZADA'
                                 req['data_hora_finalizacao'] = get_data_hora_brasil()
                                 if salvar_requisicao(req):
-                                    st.success(f"Requisição {req['numero']} finalizada com sucesso!")
+                                    # Envia email de notificação
+                                    if enviar_email_requisicao(req, 'FINALIZADA'):
+                                        st.success(f"Requisição {req['numero']} finalizada com sucesso! Email enviado.")
+                                    else:
+                                        st.success(f"Requisição {req['numero']} finalizada com sucesso! (Erro ao enviar email)")
                                     st.rerun()
                             st.markdown("</div>", unsafe_allow_html=True)
 
