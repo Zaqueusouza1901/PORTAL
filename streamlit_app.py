@@ -19,7 +19,6 @@ import shutil
 import glob
 import locale
 from streamlit_autorefresh import st_autorefresh
-from firebase_admin import credentials, db
 from email.mime.base import MIMEBase
 from email import encoders
 
