@@ -9,3 +9,6 @@ streamlit-autorefresh==1.0.1
 matplotlib
 numpy
 firebase-admin
+git add requirements.txt
+git commit -m "Adicionado firebase-admin ao requirements.txt"
+git push origin main
