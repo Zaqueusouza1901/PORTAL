@@ -1248,10 +1248,33 @@ def menu_lateral():
         st.markdown("### Menu")
         st.markdown("---")
         
-        menu_items = ["📊 Dashboard", "📝 Requisições", "⚙️ Configurações"]
-        if st.session_state['perfil'] in ['administrador', 'comprador']:
-            menu_items.insert(-1, "🛒 Cotações")
-            menu_items.insert(-1, "✈️ Importação")
+        # Obter permissões do usuário atual
+        perfil_atual = st.session_state.get('perfil', 'vendedor')
+        permissoes = st.session_state.get('perfis', {}).get(perfil_atual, {})
+        
+        # Se não tiver permissões carregadas, carregar as padrão
+        if not permissoes:
+            permissoes = get_permissoes_perfil(perfil_atual)
+            st.session_state.perfis = st.session_state.get('perfis', {})
+            st.session_state.perfis[perfil_atual] = permissoes
+        
+        # Criar itens do menu baseado nas permissões
+        menu_items = []
+        
+        if permissoes.get('dashboard', True):
+            menu_items.append("📊 Dashboard")
+        
+        if permissoes.get('requisicoes', True):
+            menu_items.append("📝 Requisições")
+        
+        if permissoes.get('cotacoes', True):
+            menu_items.append("🛒 Cotações")
+        
+        if permissoes.get('importacao', False):
+            menu_items.append("✈️ Importação")
+        
+        if permissoes.get('configuracoes', False):
+            menu_items.append("⚙️ Configurações")
         
         menu = st.radio("", menu_items, label_visibility="collapsed")
         
@@ -2857,9 +2880,6 @@ def main():
     # Carregar configurações de backup
     carregar_config_backup()
     
-    # Adiciona atualização automática a cada 1 minuto para verificar backups
-    st_autorefresh(interval=60000, key="backup_refresh")
-    
     # Verificar se precisa fazer backup automático
     verificar_backup_automatico()
     
@@ -2883,18 +2903,30 @@ def main():
         
         menu = menu_lateral()
         
-        if menu == "Dashboard":
+        # Verificar permissões antes de mostrar cada tela
+        perfil_atual = st.session_state.get('perfil', 'vendedor')
+        permissoes = st.session_state.get('perfis', {}).get(perfil_atual, {})
+        
+        # Se não tiver permissões carregadas, carregar as padrão
+        if not permissoes:
+            permissoes = get_permissoes_perfil(perfil_atual)
+            st.session_state.perfis = st.session_state.get('perfis', {})
+            st.session_state.perfis[perfil_atual] = permissoes
+        
+        if menu == "Dashboard" and permissoes.get('dashboard', True):
             dashboard()
-        elif menu == "Requisições":
+        elif menu == "Requisições" and permissoes.get('requisicoes', True):
             requisicoes()
-        elif menu == "Cotações":
+        elif menu == "Cotações" and permissoes.get('cotacoes', True):
             st.title("Cotações")
             st.info("Funcionalidade em desenvolvimento")
-        elif menu == "Importação":
+        elif menu == "Importação" and permissoes.get('importacao', False):
             st.title("Importação")
             st.info("Funcionalidade em desenvolvimento")
-        elif menu == "Configurações":
+        elif menu == "Configurações" and permissoes.get('configuracoes', False):
             configuracoes()
+        else:
+            st.warning("Você não tem permissão para acessar esta tela")
 
 if __name__ == "__main__":
     main()
