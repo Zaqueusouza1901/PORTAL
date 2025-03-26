@@ -1,17 +1,20 @@
 import streamlit as st
-import sqlite3
+import firebase_admin
+from firebase_admin import credentials, db
 import hashlib
 import pandas as pd
 import time
 import zipfile
 import matplotlib.pyplot as plt
 import gzip
+import tarfile
 import logging
 from datetime import datetime, timedelta
 import pytz
 import json
 import os
 import smtplib
+import locale
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import plotly.graph_objects as go
@@ -19,170 +22,204 @@ import shutil
 import glob
 from streamlit_autorefresh import st_autorefresh
 
+def inicializar_firebase():
+    max_tentativas = 3
+    tentativa = 0
+    while tentativa < max_tentativas:
+        try:
+            if not firebase_admin._apps:
+                cred = credentials.Certificate(
+                    "portal-26466-firebase-adminsdk-fbsvc-79cc811a7c.json")
+                firebase_admin.initialize_app(cred, {
+                    'databaseURL': 'https://portal-26466-default-rtdb.firebaseio.com'
+                })
+            return True
+        except Exception as e:
+            tentativa += 1
+            time.sleep(2 ** tentativa)  # Backoff exponencial
+    st.error(f"Falha crítica na conexão após {max_tentativas} tentativas")
+    return False
+
+# Chamada IMEDIATA após a definição da função
+if not inicializar_firebase():
+    st.stop()
+
+def verificar_conexao():
+    try:
+        ref = db.reference('.info/connected')
+        return ref.get() is True
+    except BaseException:
+        return False
+
+def processar_arquivo_requisicoes(uploaded_file):
+    try:
+        dados = json.loads(uploaded_file.getvalue().decode('utf-8'))
+        ref_requisicoes = db.reference('requisicoes')
+        ultimo_numero = max(int(req['numero']) for req in dados.values())
+
+        for numero, req in dados.items():
+            ref_requisicoes.child(numero).set(req)
+
+        # Atualizar o último número de requisição
+        db.reference('ultimo_numero').set(ultimo_numero)
+
+        st.success(f"{len(dados)} requisições importadas com sucesso!")
+        return True
+    except Exception as e:
+        st.error(f"Erro ao processar arquivo: {str(e)}")
+        return False
+    
+def formatar_moeda(valor):
+    """Formata um número no padrão brasileiro (R$ 1.000,00)."""
+    return f"{valor:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.')
+
+def converter_para_float(valor_str):
+    """Converte uma string no formato brasileiro para float."""
+    try:
+        return float(valor_str.replace('.', '').replace(',', '.'))
+    except ValueError:
+        return None
+
+def calcular_totais():
+    try:
+        ref_requisicoes = db.reference('requisicoes')
+        requisicoes = ref_requisicoes.get()
+        totais = {
+            "abertas": 0,
+            "em_andamento": 0,
+            "finalizadas": 0,
+            "recusadas": 0
+        }
+        if requisicoes:
+            for req in requisicoes.values():
+                status = req.get("status", "").upper()
+                if status == "ABERTA":
+                    totais["abertas"] += 1
+                elif status == "EM ANDAMENTO":
+                    totais["em_andamento"] += 1
+                elif status == "FINALIZADA":
+                    totais["finalizadas"] += 1
+                elif status == "RECUSADA":
+                    totais["recusadas"] += 1
+        return totais
+    except Exception as e:
+        st.error(f"Erro ao calcular totais: {str(e)}")
+        return {}
+
 def gerar_hash_senha(senha):
-    return hashlib.sha256(senha.encode()).hexdigest()
+    return hashlib.sha256(senha.encode()).hexdigest()  # Mantido igual
 
 def inicializar_banco_usuarios():
-    os.makedirs('database', exist_ok=True)
-    conn = sqlite3.connect('database/usuarios.db')
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS usuarios (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nome TEXT NOT NULL UNIQUE,
-        email TEXT NOT NULL,
-        senha TEXT,
-        perfil TEXT NOT NULL,
-        ativo BOOLEAN NOT NULL DEFAULT 1,
-        primeiro_acesso BOOLEAN NOT NULL DEFAULT 1,
-        token_sessao TEXT,
-        data_ultimo_acesso TEXT,
-        data_criacao TEXT NOT NULL,
-        data_modificacao TEXT
-    )
-    ''')
-    
-    conn.commit()
-    conn.close()
+    try:
+        ref = db.reference('usuarios')
+        usuarios = ref.get()
+
+        # Cria usuário administrador personalizado (Zaqueu Souza)
+        if not usuarios or 'ZAQUEU SOUZA' not in usuarios:
+            admin_data = {
+                'nome': 'ZAQUEU SOUZA',
+                'email': 'Importacao@jetfrio.com.br',
+                # Hash da senha fornecida
+                'senha': gerar_hash_senha('Za@031162'),
+                'perfil': 'administrador',
+                'ativo': True,
+                'primeiro_acesso': False,
+                'token_sessao': None,
+                'data_ultimo_acesso': None,
+                'data_criacao': datetime.now(pytz.timezone('America/Sao_Paulo')).isoformat(),
+                'data_modificacao': None
+            }
+            # ID 'zaqueu' para fácil identificação
+            ref.child('ZAQUEU SOUZA').set(admin_data)
+
+    except Exception as e:
+        st.error(f"Erro ao inicializar usuários: {str(e)}")
 
 def inicializar_sistema():
     try:
-        # Criar diretórios necessários
-        os.makedirs('database', exist_ok=True)
+        # Mantido para compatibilidade com backups locais
         os.makedirs('backups', exist_ok=True)
-        
-        # Inicializar bancos
+
+        # Inicializações do Firebase
         inicializar_banco_usuarios()
         inicializar_banco()
-        
-        # Migrar dados existentes se necessário
-        if os.path.exists('usuarios.json'):
-            conn = sqlite3.connect('database/usuarios.db')
-            cursor = conn.cursor()
-            cursor.execute('SELECT COUNT(*) FROM usuarios')
-            total_usuarios = cursor.fetchone()[0]
-            conn.close()
-            
-            # Só migra se não houver usuários no banco
-            if total_usuarios == 0:
-                migrar_usuarios_json_para_sqlite()
-        
-        # Executar backup automático diário
-        timestamp = datetime.now().strftime('%Y%m%d')
-        backup_path = f'backups/backup_{timestamp}.zip'
-        
-        # Verifica se já existe backup do dia
-        if not os.path.exists(backup_path):
-            backup_automatico()
-            
-        # Limpar backups antigos
-        limpar_backups_antigos('backups')
-        
+
         return True
     except Exception as e:
-        st.error(f"Erro na inicialização do sistema: {str(e)}")
+        st.error(f"Falha crítica na inicialização: {str(e)}")
         return False
 
-def migrar_usuarios_json_para_sqlite():
+def migrar_usuarios_json_para_firebase():  # Nome alterado
     try:
         with open('usuarios.json', 'r', encoding='utf-8') as f:
             usuarios_json = json.load(f)
-            
-        conn = sqlite3.connect('database/usuarios.db')
-        cursor = conn.cursor()
-        
-        for nome, dados in usuarios_json.items():
-            cursor.execute('''
-                INSERT OR REPLACE INTO usuarios 
-                (nome, email, senha, perfil, ativo, primeiro_acesso, data_criacao)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                nome,
-                dados['email'],
-                dados['senha'],
-                dados['perfil'],
-                dados['ativo'],
-                dados.get('primeiro_acesso', True),
-                get_data_hora_brasil()
-            ))
-        
-        conn.commit()
-        conn.close()
+
+        ref = db.reference('usuarios')  # Conexão Firebase
+
+        for usuario_id, dados in usuarios_json.items():
+            # Mantém todos os campos originais
+            ref.child(usuario_id).set({
+                'nome': dados['nome'],
+                'email': dados['email'],
+                'senha': dados['senha'],
+                'perfil': dados['perfil'],
+                'ativo': dados['ativo'],
+                'primeiro_acesso': dados.get('primeiro_acesso', True),
+                'data_criacao': dados.get('data_criacao', datetime.now(pytz.timezone('America/Sao_Paulo')).isoformat())
+            })
+
         return True
     except Exception as e:
-        print(f"Erro na migração: {str(e)}")
+        st.error(f"Erro na migração: {str(e)}")  # Melhor tratamento de erro
         return False
 
 def inicializar_banco():
     try:
-        conn = sqlite3.connect('database/requisicoes.db')  # Caminho correto
-        cursor = conn.cursor()
-        cursor.execute('''CREATE TABLE IF NOT EXISTS requisicoes
-            (numero TEXT PRIMARY KEY, 
-            cliente TEXT,
-            vendedor TEXT,
-            data_hora TEXT,
-            status TEXT,
-            items TEXT,
-            observacoes_vendedor TEXT,
-            comprador_responsavel TEXT,
-            data_hora_resposta TEXT,
-            justificativa_recusa TEXT,
-            observacao_geral TEXT)''')
-        conn.commit()
-        conn.close()
+        # Firebase não precisa criar tabelas, apenas verifica/incializa a
+        # referência
+        ref = db.reference('requisicoes')
+        if not ref.get():
+            ref.set({'ultimo_numero': 0})  # Inicializa se necessário
     except Exception as e:
-        st.error(f"Erro ao inicializar banco: {str(e)}")
+        st.error(f"Falha crítica ao iniciar banco: {str(e)}")
 
 def mostrar_espaco_armazenamento():
     import plotly.graph_objects as go
-    import os
-    import glob
-    
-    # Calcula o espaço usado pelos backups
-    backup_files = glob.glob('backup/*')
-    espaco_usado = sum(os.path.getsize(f) for f in backup_files) / (1024 * 1024)  # Converte para MB
-    
-    # Define o espaço total (exemplo: 1000 MB)
-    espaco_total = 1000  # MB
-    espaco_disponivel = espaco_total - espaco_usado
-    
-    # Cria o gráfico de rosca
-    fig = go.Figure(data=[go.Pie(
-        labels=['Disponível', 'Usado'],
-        values=[espaco_disponivel, espaco_usado],
-        hole=.7,
-        marker_colors=['#66b3ff', '#ff9999'],
-        textinfo='percent',
-        textfont_size=20,
-        showlegend=True
-    )])
-    
-    # Atualiza o layout
-    fig.update_layout(
-        title=dict(
-            text="Espaço de Armazenamento",
-            y=0.95,
-            x=0.5,
-            xanchor='center',
-            yanchor='top',
-            font=dict(size=16)
-        ),
-        annotations=[dict(
-            text=f'{espaco_usado:.1f}MB<br>de {espaco_total}MB',
-            x=0.5,
-            y=0.5,
-            font_size=14,
-            showarrow=False
-        )],
-        height=300,
-        margin=dict(t=50, l=0, r=0, b=0),
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)'
-    )
-    
-    return fig
+
+    try:
+        # Simulação dos valores (substitua pelos dados reais do Firebase Storage)
+        espaco_usado_mb = 1200  # Espaço usado em MB
+        espaco_total_mb = 5120  # Espaço total em MB (exemplo: plano gratuito)
+
+        espaco_disponivel_mb = espaco_total_mb - espaco_usado_mb
+
+        fig = go.Figure(data=[go.Pie(
+            labels=['Disponível', 'Usado'],
+            values=[espaco_disponivel_mb, espaco_usado_mb],
+            hole=.6,
+            marker_colors=['#66b3ff', '#ff9999'],
+            textinfo='label+percent',
+        )])
+
+        fig.update_layout(
+            title=dict(
+                text="Armazenamento do Firebase",
+                font=dict(size=16),
+                x=0.5
+            ),
+            annotations=[dict(
+                text=f"{espaco_usado_mb:.1f}MB usados",
+                x=0.5,
+                y=0.5,
+                font_size=12,
+                showarrow=False
+            )],
+        )
+
+        return fig
+
+    except Exception as e:
+        raise Exception(f"Erro ao gerar gráfico: {str(e)}")
 
 EMAIL_CONFIG = {
     'SMTP_SERVER': 'smtp-mail.outlook.com',
@@ -196,16 +233,21 @@ def enviar_email_requisicao(requisicao, tipo_notificacao):
     try:
         msg = MIMEMultipart()
         msg['From'] = EMAIL_CONFIG['EMAIL']
-        msg['Subject'] = f"SUA REQUISIÇÃO Nº{requisicao['numero']} FOI {tipo_notificacao.upper()}"
-        
+        msg['Subject'] = f"SUA REQUISIÇÃO Nº{
+            requisicao['numero']} FOI {
+            tipo_notificacao.upper()}"
+
         # Define destinatários
         vendedor_email = st.session_state.usuarios[requisicao['vendedor']]['email']
-        comprador_email = st.session_state.usuarios.get(requisicao.get('comprador_responsavel', ''), {}).get('email', '')
-        
+        comprador_email = st.session_state.usuarios.get(
+            requisicao.get(
+                'comprador_responsavel', ''), {}).get(
+            'email', '')
+
         msg['To'] = vendedor_email
         if comprador_email:
             msg['Cc'] = comprador_email
-        
+
         # Cria tabela HTML dos itens
         html = f"""
         <html>
@@ -213,7 +255,7 @@ def enviar_email_requisicao(requisicao, tipo_notificacao):
                 <h2>Requisição #{requisicao['numero']}</h2>
                 <p><strong>Cliente:</strong> {requisicao['cliente']}</p>
                 <p><strong>Status:</strong> {requisicao['status']}</p>
-                
+
                 <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 10px 0;">
                     <p><strong>Criado por:</strong> {requisicao['vendedor']}</p>
                     <p><strong>Data/Hora Criação:</strong> {requisicao['data_hora']}</p>
@@ -233,7 +275,6 @@ def enviar_email_requisicao(requisicao, tipo_notificacao):
                         <th>Prazo</th>
                     </tr>
         """
-        
         for item in requisicao['items']:
             html += f"""
                 <tr>
@@ -247,11 +288,10 @@ def enviar_email_requisicao(requisicao, tipo_notificacao):
                     <td>{item.get('prazo_entrega', '-')}</td>
                 </tr>
             """
-        
+
         html += """
                 </table>
         """
-
         # Adiciona observações se existirem
         if requisicao.get('observacao_geral'):
             html += f"""
@@ -274,9 +314,9 @@ def enviar_email_requisicao(requisicao, tipo_notificacao):
             </body>
         </html>
         """
-        
+
         msg.attach(MIMEText(html, 'html'))
-        
+
         # Envia o email
         with smtplib.SMTP(EMAIL_CONFIG['SMTP_SERVER'], EMAIL_CONFIG['SMTP_PORT']) as server:
             server.starttls()
@@ -285,7 +325,7 @@ def enviar_email_requisicao(requisicao, tipo_notificacao):
             if comprador_email:
                 destinatarios.append(comprador_email)
             server.send_message(msg)
-        
+
         return True
     except Exception as e:
         st.error(f"Erro ao enviar email: {str(e)}")
@@ -300,60 +340,53 @@ st.set_page_config(
 
 def save_perfis_permissoes(perfil, permissoes):
     try:
-        try:
-            with open('perfis.json', 'r', encoding='utf-8') as f:
-                perfis = json.load(f)
-        except FileNotFoundError:
-            perfis = {}
-        except json.JSONDecodeError:
-            perfis = {}
-        
-        perfis[perfil] = permissoes
-        
-        with open('perfis.json', 'w', encoding='utf-8') as f:
-            json.dump(perfis, f, ensure_ascii=False, indent=4)
-            
+        # Referência para o nó 'perfis' no Firebase
+        ref = db.reference('perfis')
+
+        # Salva ou atualiza as permissões do perfil no Firebase
+        ref.child(perfil).set(permissoes)
+
         return True
-    
     except Exception as e:
         st.error(f"Erro ao salvar permissões: {str(e)}")
         return False
 
-
-
 def verificar_diretorios():
-    diretorios = ['database', 'backups']
+    # Não é mais necessário verificar diretórios locais para o banco de dados
+    # Mas mantemos a verificação para backups
+    diretorios = ['backups']  # Apenas para backups locais
     for dir in diretorios:
         if not os.path.exists(dir):
             os.makedirs(dir)
-            
-    # Verificar se o banco existe
-    if not os.path.exists('database/requisicoes.db'):
-        inicializar_banco()
     return True
 
 def importar_dados_antigos():
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')  # Definir timestamp no início da função
+    # Define timestamp no início da função
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     try:
-        # Verificar maior número atual antes da importação
-        conn = sqlite3.connect('database/requisicoes.db')
-        cursor = conn.cursor()
-        cursor.execute('SELECT MAX(CAST(numero AS INTEGER)) FROM requisicoes')
-        ultimo_numero_atual = cursor.fetchone()[0] or 4999
-        
+        # Referência para o nó de requisições no Firebase
+        ref_requisicoes = db.reference('requisicoes')
+
+        # Obter o último número de requisição
+        ultimo_numero_ref = db.reference('ultimo_numero')
+        # Se não existir, começa em 4999
+        ultimo_numero_atual = ultimo_numero_ref.get() or 4999
+
         # Carregar dados do JSON
         with open('requisicoes.json', 'r', encoding='utf-8') as file:
             requisicoes_antigas = json.load(file)
 
-        # Backup preventivo
-        shutil.copy2('database/requisicoes.db', f'backups/pre_import_{timestamp}.db')
+        # Backup preventivo (opcional, mas mantido para segurança)
+        backup_ref = db.reference('backups').child(f'pre_import_{timestamp}')
+        # Salva o estado atual das requisições no Firebase
+        backup_ref.set(ref_requisicoes.get())
 
-        # Inserir dados formatados
+        # Inserir dados formatados no Firebase
         for req in requisicoes_antigas:
             numero_req = int(req.get('REQUISIÇÃO', 0))
             if numero_req > ultimo_numero_atual:
                 ultimo_numero_atual = numero_req
-                
+
             items = [{
                 'item': 1,
                 'codigo': req.get('CÓDIGO', ''),
@@ -363,485 +396,398 @@ def importar_dados_antigos():
                 'quantidade': float(req.get('QUANTIDADE', 0)),
                 'status': 'ABERTA'
             }]
-            
-            cursor.execute('''
-                INSERT OR REPLACE INTO requisicoes 
-                (numero, cliente, vendedor, data_hora, status, items, 
-                observacoes_vendedor, comprador_responsavel, data_hora_resposta,
-                justificativa_recusa, observacao_geral)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                req.get('REQUISIÇÃO'),
-                req.get('CLIENTE'),
-                req.get('VENDEDOR'),
-                req.get('Data/Hora Criação:'),
-                req.get('STATUS'),
-                json.dumps(items),
-                '',
-                req.get('COMPRADOR', ''),
-                req.get('Data/Hora Resposta:'),
-                '',
-                req.get('OBSERVAÇÕES DO COMPRADOR', '')
-            ))
 
-        # Atualizar último número
-        with open('ultimo_numero.json', 'w') as f:
-            json.dump({'numero': ultimo_numero_atual}, f)
-            
-        conn.commit()
-        conn.close()
+            nova_requisicao = {
+                'numero': req.get('REQUISIÇÃO'),
+                'cliente': req.get('CLIENTE'),
+                'vendedor': req.get('VENDEDOR'),
+                'data_hora': req.get('Data/Hora Criação:'),
+                'status': req.get('STATUS'),
+                'items': items,
+                'observacoes_vendedor': '',
+                'comprador_responsavel': req.get('COMPRADOR', ''),
+                'data_hora_resposta': req.get('Data/Hora Resposta:'),
+                'justificativa_recusa': '',
+                'observacao_geral': req.get('OBSERVAÇÕES DO COMPRADOR', '')
+            }
+
+            ref_requisicoes.child(
+                str(req.get('REQUISIÇÃO'))).set(nova_requisicao)
+
+        # Atualizar último número no Firebase
+        ultimo_numero_ref.set(ultimo_numero_atual)
+
         return True
     except Exception as e:
-        # Restaurar backup em caso de erro
-        if os.path.exists(f'backups/pre_import_{timestamp}.db'):
-            shutil.copy2(f'backups/pre_import_{timestamp}.db', 'database/requisicoes.db')
-        print(f"Erro na importação: {str(e)}")
+        st.error(f"Erro na importação: {str(e)}")
         return False
 
 def verificar_arquivos():
     try:
-        arquivos_necessarios = ['requisicoes.json', 'usuarios.json', 'ultimo_numero.json']
-        for arquivo in arquivos_necessarios:
-            if not os.path.exists(arquivo):
-                with open(arquivo, 'w', encoding='utf-8') as f:
-                    json.dump([] if arquivo == 'requisicoes.json' else {}, f, ensure_ascii=False, indent=4)
         os.makedirs('backup', exist_ok=True)
         return True
     except Exception as e:
-        st.error(f"Erro ao verificar arquivos: {str(e)}")
+        st.error(f"Erro ao verificar diretórios: {str(e)}")
         return False
 
 def carregar_usuarios():
     try:
-        with open('usuarios.json', 'r', encoding='utf-8') as f:
-            usuarios = json.load(f)
-            return usuarios
-    except json.JSONDecodeError:
-        # Retorna usuário padrão em caso de erro
-        return {
-            'ZAQUEU SOUZA': {
-                'senha': None,
-                'perfil': 'administrador',
-                'email': 'zaqueu@jetfrio.com.br',
-                'ativo': True,
-                'primeiro_acesso': True
+        ref = db.reference('usuarios')
+        usuarios = ref.get()
+        if not usuarios:
+            usuario_padrao = {
+                'ZAQUEU SOUZA': {
+                    'senha': gerar_hash_senha('Za@031162'),
+                    'perfil': 'administrador',
+                    'email': 'Importacao@jetfrio.com.br',
+                    'ativo': True,
+                    'primeiro_acesso': False
+                }
             }
-        }
+            ref.set(usuario_padrao)
+            return usuario_padrao
+        return usuarios
+    except Exception as e:
+        st.error(f"Erro ao carregar usuários: {str(e)}")
+        return {}
 
 def salvar_usuarios():
     try:
-        backup_file = 'usuarios.json.bak'
-        # Fazer backup do arquivo atual
-        if os.path.exists('usuarios.json'):
-            shutil.copy2('usuarios.json', backup_file)
-            
-        # Salvar os dados garantindo que primeiro_acesso seja salvo corretamente
-        with open('usuarios.json', 'w', encoding='utf-8') as f:
-            usuarios_para_salvar = {
-                usuario: {
-                    'senha': str(dados['senha']),
-                    'perfil': dados['perfil'],
-                    'email': dados['email'],
-                    'ativo': dados['ativo'],
-                    'primeiro_acesso': dados.get('primeiro_acesso', True)
-                }
-                for usuario, dados in st.session_state.usuarios.items()
+        ref = db.reference('usuarios')
+
+        backup_ref = db.reference('backups/usuarios')
+        backup_ref.set(ref.get())
+
+        usuarios_para_salvar = {
+            usuario: {
+                'senha': str(dados['senha']),
+                'perfil': dados['perfil'],
+                'email': dados['email'],
+                'ativo': dados['ativo'],
+                'primeiro_acesso': dados.get('primeiro_acesso', True)
             }
-            json.dump(usuarios_para_salvar, f, ensure_ascii=False, indent=4)
-            
-        # Verificar integridade
-        with open('usuarios.json', 'r', encoding='utf-8') as f:
-            json.load(f)  # Tenta ler o arquivo para verificar se está válido
-            
-        # Remove backup se tudo deu certo
-        if os.path.exists(backup_file):
-            os.remove(backup_file)
-            
+            for usuario, dados in st.session_state.usuarios.items()
+        }
+        ref.set(usuarios_para_salvar)
+
         return True
     except Exception as e:
-        # Restaura backup em caso de erro
-        if os.path.exists(backup_file):
-            shutil.copy2(backup_file, 'usuarios.json')
         st.error(f"Erro ao salvar usuários: {str(e)}")
         return False
 
-def migrar_dados_json_para_sqlite():
+def migrar_dados_json_para_firebase():
     try:
         with open('requisicoes.json', 'r', encoding='utf-8') as f:
             requisicoes_json = json.load(f)
-        
-        conn = sqlite3.connect('database/requisicoes.db')
-        cursor = conn.cursor()
-        
+
+        ref = db.reference('requisicoes')
+
         for req in requisicoes_json:
-            cursor.execute('''
-                INSERT OR REPLACE INTO requisicoes 
-                (numero, cliente, vendedor, data_hora, status, items, 
-                observacoes_vendedor, comprador_responsavel, data_hora_resposta,
-                justificativa_recusa, observacao_geral)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                req['REQUISIÇÃO'],
-                req['CLIENTE'],
-                req['VENDEDOR'],
-                req['Data/Hora Criação:'],
-                req['STATUS'],
-                json.dumps([{
+            # Converter para estrutura do Firebase
+            nova_requisicao = {
+                'numero': req['REQUISIÇÃO'],
+                'cliente': req['CLIENTE'],
+                'vendedor': req['VENDEDOR'],
+                'data_hora': req['Data/Hora Criação:'],
+                'status': req['STATUS'],
+                'items': [{
                     'codigo': req['CÓDIGO'],
                     'descricao': req['DESCRIÇÃO'],
                     'marca': req['MARCA'],
-                    'quantidade': req['QUANTIDADE'],
-                    'venda_unit': req[' R$ UNIT '].replace('R$ ', '').replace(',', '.').strip(),
+                    'quantidade': float(req['QUANTIDADE']),
+                    'venda_unit': float(req[' R$ UNIT '].replace('R$ ', '').replace(',', '.').strip()),
                     'prazo_entrega': req['PRAZO']
-                }]),
-                '',
-                req['COMPRADOR'],
-                req['Data/Hora Resposta:'],
-                '',
-                req['OBSERVAÇÕES DO COMPRADOR']
-            ))
-        
-        conn.commit()
-        conn.close()
+                }],
+                'observacoes_vendedor': '',
+                'comprador_responsavel': req['COMPRADOR'],
+                'data_hora_resposta': req['Data/Hora Resposta:'],
+                'justificativa_recusa': '',
+                'observacao_geral': req['OBSERVAÇÕES DO COMPRADOR']
+            }
+
+            # Salvar no Firebase usando o número como chave
+            ref.child(str(req['REQUISIÇÃO'])).set(nova_requisicao)
+
         return True
     except Exception as e:
-        print(f"Erro na migração: {str(e)}")
+        st.error(f"Erro na migração: {str(e)}")
         return False
-    
+
 def carregar_requisicoes():
     try:
-        conn = sqlite3.connect('database/requisicoes.db')
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM requisicoes')
-        requisicoes = []
-        for row in cursor.fetchall():
-            try:
-                items = json.loads(row[5]) if row[5] else []
-            except:
-                items = []
-                
-            requisicao = {
-                'numero': row[0],
-                'cliente': row[1],
-                'vendedor': row[2],
-                'data_hora': row[3],
-                'status': row[4],
-                'items': items,
-                'observacoes_vendedor': row[6],
-                'comprador_responsavel': row[7],
-                'data_hora_resposta': row[8],
-                'justificativa_recusa': row[9],
-                'observacao_geral': row[10]
-            }
-            requisicoes.append(requisicao)
-        conn.close()
-        return requisicoes
+        ref_requisicoes = db.reference('requisicoes')
+        requisicoes = ref_requisicoes.get()
+
+        # Verificar se os dados são válidos
+        if isinstance(requisicoes, dict):
+            requisicoes_processadas = []
+            for key, req in requisicoes.items():
+                if isinstance(req, dict):
+                    # Garantir que 'items' seja uma lista de dicionários
+                    try:
+                        req['items'] = json.loads(
+                            req.get(
+                                'items',
+                                '[]')) if isinstance(
+                            req.get('items'),
+                            str) else req.get(
+                'items',
+                            [])
+                    except json.JSONDecodeError:
+                        req['items'] = []
+                    requisicoes_processadas.append(req)
+            return requisicoes_processadas
+        else:
+            st.error("Os dados das requisições não estão no formato esperado.")
+            return []
     except Exception as e:
         st.error(f"Erro ao carregar requisições: {str(e)}")
         return []
 
 def renumerar_requisicoes():
     try:
-        conn = sqlite3.connect('requisicoes.db')
-        cursor = conn.cursor()
-        
-        # Buscar todas as requisições ordenadas por data
-        cursor.execute('SELECT * FROM requisicoes ORDER BY data_hora')
-        requisicoes = cursor.fetchall()
-        
-        # Iniciar numeração a partir de 5092
+        ref = db.reference('requisicoes')
+        todas_requisicoes = ref.get()
+
+        if not todas_requisicoes:
+            return False
+
+        # Ordenar por data/hora
+        requisicoes_ordenadas = sorted(
+            todas_requisicoes.values(),
+            key=lambda x: x['data_hora']
+        )
+
+        # Novo sistema de numeração
         novo_numero = 5092
-        
-        # Atualizar cada requisição com novo número
-        for req in requisicoes:
-            cursor.execute('''
-                UPDATE requisicoes 
-                SET numero = ? 
-                WHERE numero = ?
-            ''', (novo_numero, req[0]))
+        novas_requisicoes = {}
+
+        for req in requisicoes_ordenadas:
+            nova_chave = str(novo_numero)
+            req['numero'] = nova_chave
+            novas_requisicoes[nova_chave] = req
             novo_numero += 1
-        
-        conn.commit()
-        conn.close()
+
+        # Atualizar Firebase
+        ref.set(novas_requisicoes)
         return True
+
     except Exception as e:
-        print(f"Erro ao renumerar requisições: {str(e)}")
+        st.error(f"Falha na renumerção: {str(e)}")
         return False
 
 def backup_requisicoes():
     try:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_file = f'backup/requisicoes_backup_{timestamp}.json'
-        os.makedirs('backup', exist_ok=True)
-        
-        if os.path.exists('requisicoes.json'):
-            shutil.copy2('requisicoes.json', backup_file)
-            return True
-        return False
+        # Referência ao nó 'requisicoes' no Firebase
+        ref = db.reference('requisicoes')
+        dados = ref.get()
+
+        # Verifica se há dados antes de prosseguir
+        if not dados or not isinstance(dados, dict):
+            raise ValueError("Nenhuma requisição encontrada ou dados inválidos.")
+
+        # Gera o timestamp para nomear o arquivo
+        timestamp = datetime.now(pytz.timezone('America/Sao_Paulo')).strftime("%Y%m%d_%H%M%S")
+        backup_dir = 'backups'
+        os.makedirs(backup_dir, exist_ok=True)
+        backup_file = os.path.join(backup_dir, f'requisicoes_backup_{timestamp}.json')
+
+        # Salva os dados em um arquivo JSON
+        with open(backup_file, 'w', encoding='utf-8') as f:
+            json.dump(dados, f, ensure_ascii=False, indent=4)
+
+        # Retorna o caminho do arquivo gerado
+        return backup_file
+
     except Exception as e:
-        print(f"Erro no backup: {str(e)}")
-        return False
+        st.error(f"FALHA NO BACKUP: {str(e)}")
+        return None
 
 def verificar_integridade_db():
-    conn = sqlite3.connect('database/requisicoes.db')
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA integrity_check")
-    resultado = cursor.fetchone()
-    conn.close()
-    return resultado[0] == 'ok'
+    try:
+        # Verifica conexão e carrega dados básicos
+        usuarios = db.reference('usuarios').get()
+        requisicoes = db.reference('requisicoes').get()
+        return bool(usuarios is not None and requisicoes is not None)
+    except Exception as e:
+        st.error(f"Falha na verificação de integridade: {str(e)}")
+        return False
 
 def verificar_conteudo_backup(arquivo_backup):
-    with zipfile.ZipFile(arquivo_backup, 'r') as zip_ref:
-        arquivos_esperados = ['usuarios.db', 'requisicoes.db', 'usuarios.json', 'perfis.json', 'requisicoes.json', 'ultimo_numero.json']
-        arquivos_presentes = zip_ref.namelist()
-        return all(arquivo in arquivos_presentes for arquivo in arquivos_esperados)
-
-def backup_automatico(dados=None):
     try:
-        # Criar diretório de backup se não existir
-        backup_dir = 'backups/'
-        os.makedirs(backup_dir, exist_ok=True)
-        
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        
-        # Definir arquivos para backup
-        arquivos_backup = {
-            'usuarios_db': 'database/usuarios.db',
-            'requisicoes_db': 'database/requisicoes.db',
-            'usuarios': 'usuarios.json',
-            'perfis': 'perfis.json',
-            'requisicoes': 'requisicoes.json',
-            'ultimo_numero': 'ultimo_numero.json'
-        }
-        
-        backup_file = os.path.join(backup_dir, f'backup_{timestamp}.zip')
-        
-        # Criar arquivo ZIP com todos os backups
-        with zipfile.ZipFile(backup_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for nome, arquivo in arquivos_backup.items():
-                if os.path.exists(arquivo):
-                    zipf.write(arquivo, os.path.basename(arquivo))
-        
-        # Comprimir o backup
-        comprimir_backup(backup_file)
-        
-        # Verificar integridade e conteúdo do backup
-        if verificar_integridade_db() and verificar_conteudo_backup(f"{backup_file}.gz"):
-            logging.info(f"Backup realizado com sucesso e integridade verificada: {backup_file}.gz")
-        else:
-            logging.error("Problemas detectados no backup. Verificação necessária.")
-            return None, 0
-        
-        # Limpar backups antigos
-        limpar_backups_antigos(backup_dir)
-        
-        return f"{backup_file}.gz", os.path.getsize(f"{backup_file}.gz")
-    except Exception as e:
-        logging.error(f"Erro ao realizar backup: {str(e)}")
-        return None, 0
+        # Abre e verifica o conteúdo do arquivo JSON
+        with open(arquivo_backup, 'r', encoding='utf-8') as f:
+            dados = json.load(f)
 
-def comprimir_backup(backup_path):
-    with open(backup_path, 'rb') as f_in:
-        with gzip.open(f'{backup_path}.gz', 'wb') as f_out:
-            f_out.writelines(f_in)
-    os.remove(backup_path)  # Remove o arquivo ZIP original após a compressão
+        # Verifica se os campos principais estão presentes
+        if not isinstance(dados, dict) or not all(isinstance(req, dict) for req in dados.values()):
+            raise ValueError("Estrutura de dados inválida no backup.")
+
+        return True
+
+    except Exception as e:
+        st.error(f"Backup corrompido ou incompleto: {str(e)}")
+        return False
+
+def backup_automatico():
+    try:
+        timestamp = datetime.now(pytz.timezone('America/Sao_Paulo')).strftime('%Y%m%d_%H%M%S')
+        backup_dir = f'backups/firebase_backup_{timestamp}'
+        os.makedirs(backup_dir, exist_ok=True)
+
+        # Coletar dados do Firebase
+        dados_backup = {
+            'usuarios': db.reference('usuarios').get(),
+            'requisicoes': db.reference('requisicoes').get(),
+            'perfis': db.reference('perfis').get(),
+            'ultimo_numero': db.reference('ultimo_numero').get()
+        }
+
+        # Salvar em arquivo JSON
+        backup_file = os.path.join(backup_dir, f'backup_{timestamp}.json')
+        with open(backup_file, 'w', encoding='utf-8') as f:
+            json.dump(dados_backup, f, ensure_ascii=False, indent=4)
+
+        # Comprimir usando a abordagem do arquivo antigo (mais confiável)
+        with open(backup_file, 'rb') as f_in:
+            with gzip.open(f'{backup_file}.gz', 'wb') as f_out:
+                f_out.writelines(f_in)
+        
+        # Remover arquivo original não comprimido
+        os.remove(backup_file)
+        shutil.rmtree(backup_dir)  # Remove diretório temporário
+
+        # Verificação de integridade
+        if not verificar_conteudo_backup(f'{backup_file}.gz'):
+            raise Exception("Backup corrompido ou incompleto")
+
+        limpar_backups_antigos('backups')
+        return f'{backup_file}.gz'
+
+    except Exception as e:
+        st.error(f"FALHA NO BACKUP: {str(e)}")
+        # Limpeza em caso de erro
+        if os.path.exists(backup_dir):
+            shutil.rmtree(backup_dir)
+        if os.path.exists(f'{backup_file}.gz'):
+            os.remove(f'{backup_file}.gz')
+        return None
+
+def comprimir_backup(backup_dir):
+    try:
+        saida = f'{backup_dir}.tar.gz'
+        with tarfile.open(saida, "w:gz") as tar:
+            tar.add(backup_dir, arcname=os.path.basename(backup_dir))
+        shutil.rmtree(backup_dir)  # Remove diretório original
+        return saida
+    except Exception as e:
+        raise Exception(f"Falha na compressão: {str(e)}")
 
 def limpar_backups_antigos(backup_dir, dias_manter=7):
     try:
-        data_limite = datetime.now() - timedelta(days=dias_manter)
-        
-        for arquivo in os.listdir(backup_dir):
-            if arquivo.startswith('backup_') and arquivo.endswith('.zip'):
-                caminho_arquivo = os.path.join(backup_dir, arquivo)
-                data_arquivo = datetime.fromtimestamp(os.path.getctime(caminho_arquivo))
+        agora = datetime.now(pytz.timezone('America/Sao_Paulo'))
+        limite = agora - timedelta(days=dias_manter)
+
+        for item in os.listdir(backup_dir):
+            if item.startswith('firebase_backup_') and item.endswith('.gz'):
+                caminho = os.path.join(backup_dir, item)
+                data_criacao = datetime.fromtimestamp(os.path.getctime(caminho))
+                data_criacao = data_criacao.replace(tzinfo=pytz.timezone('America/Sao_Paulo'))
                 
-                if data_arquivo < data_limite:
-                    os.remove(caminho_arquivo)
+                if data_criacao < limite:
+                    os.remove(caminho)
     except Exception as e:
-        print(f"Erro ao limpar backups antigos: {str(e)}")
+        st.error(f"Erro na limpeza de backups: {str(e)}")
 
 def listar_backups(backup_dir='backups/'):
     if not os.path.exists(backup_dir):
         os.makedirs(backup_dir)
-        
-    st.title("Gerenciamento de Backups")
-    
-    # Lista e organiza backups
+
     backups = []
     for arquivo in os.listdir(backup_dir):
-        if arquivo.startswith('backup_') and (arquivo.endswith('.zip') or arquivo.endswith('.gz')):
+        if arquivo.startswith('requisicoes_backup_') and arquivo.endswith('.json'):
             caminho_arquivo = os.path.join(backup_dir, arquivo)
             tamanho = os.path.getsize(caminho_arquivo)
             data_criacao = datetime.fromtimestamp(os.path.getctime(caminho_arquivo))
-            
-            # Identifica se é backup automático ou manual
-            tipo = 'AUTOMÁTICO' if 'auto' in arquivo.lower() else 'MANUAL'
-            
-            # Formata o tamanho do arquivo
-            if tamanho < 1024:
-                tamanho_fmt = f"{tamanho} B"
-            elif tamanho < 1024**2:
-                tamanho_fmt = f"{tamanho/1024:.1f} KB"
-            else:
-                tamanho_fmt = f"{tamanho/1024**2:.1f} MB"
-            
+            tamanho_fmt = f"{tamanho / 1024:.1f} KB"
+
             backups.append({
                 'Data': data_criacao.strftime('%d/%m/%Y'),
                 'Hora': data_criacao.strftime('%H:%M:%S'),
-                'Tipo': tipo,
                 'Tamanho': tamanho_fmt,
                 'Arquivo': arquivo,
                 'Caminho': caminho_arquivo
             })
-    
+
     if backups:
-        # Cria DataFrame e ordena por data/hora mais recente
         df = pd.DataFrame(backups)
         df = df.sort_values(by=['Data', 'Hora'], ascending=[False, False])
-        
-        # Configura a exibição do DataFrame
-        st.dataframe(
-            df,
-            column_config={
-                "Data": st.column_config.TextColumn(
-                    "Data",
-                    width="small",
-                    help="Data de criação do backup"
-                ),
-                "Hora": st.column_config.TextColumn(
-                    "Hora",
-                    width="small"
-                ),
-                "Tipo": st.column_config.TextColumn(
-                    "Tipo",
-                    width="medium"
-                ),
-                "Tamanho": st.column_config.TextColumn(
-                    "Tamanho",
-                    width="small"
-                ),
-                "Arquivo": "Nome do Arquivo",
-                "Caminho": None  # Oculta a coluna do caminho
-            },
-            hide_index=True,
-            use_container_width=True
-        )
-        
-        # Adiciona botões de ação para cada backup
-        for idx, backup in df.iterrows():
+
+        for _, row in df.iterrows():
             col1, col2 = st.columns([1, 4])
             with col1:
-                with open(backup['Caminho'], 'rb') as file:
+                with open(row['Caminho'], 'rb') as file:
                     st.download_button(
                         "📥 Download",
                         file,
-                        file_name=backup['Arquivo'],
-                        mime="application/octet-stream",
-                        key=f"download_{idx}"
+                        file_name=row['Arquivo'],
+                        mime="application/json"
                     )
             with col2:
-                if st.button("🗑️ Excluir", key=f"delete_{idx}"):
-                    try:
-                        os.remove(backup['Caminho'])
-                        st.success("Backup removido com sucesso!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Erro ao remover backup: {str(e)}")
+                if st.button("🗑️ Excluir", key=f"delete_{row['Arquivo']}"):
+                    os.remove(row['Caminho'])
+                    st.success(f"Backup {row['Arquivo']} removido com sucesso!")
+                    st.rerun()
     else:
         st.info("Nenhum backup encontrado.")
 
-def restaurar_backup():
+def restaurar_backup(uploaded_file):
     try:
-        conn = sqlite3.connect('database/requisicoes.db')
-        cursor = conn.cursor()
+        # Carrega os dados do arquivo enviado pelo usuário
+        dados_backup = json.loads(uploaded_file.getvalue().decode('utf-8'))
+
+        if not isinstance(dados_backup, dict):
+            raise ValueError("O arquivo de backup não contém um formato válido.")
+
+        # Referência ao nó 'requisicoes' no Firebase
+        ref_requisicoes = db.reference('requisicoes')
         
-        # Verificar maior número antes da restauração
-        cursor.execute('SELECT MAX(CAST(numero AS INTEGER)) FROM requisicoes')
-        ultimo_numero_atual = cursor.fetchone()[0] or 4999
-        
-        # Fazer backup preventivo antes de limpar
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        shutil.copy2('database/requisicoes.db', f'backups/pre_restore_{timestamp}.db')
-        
-        # Limpa tabela atual
-        cursor.execute('DELETE FROM requisicoes')
-        
-        # Carrega dados do backup
-        with open('backup/ultimo_backup.json', 'r', encoding='utf-8') as f:
-            dados = json.load(f)
-            
-        for req in dados:
-            # Garante que items seja string JSON
-            if isinstance(req['items'], list):
-                req['items'] = json.dumps(req['items'])
-            
-            # Verifica se o número é maior que o último número atual
-            if int(req['numero']) > ultimo_numero_atual:
-                ultimo_numero_atual = int(req['numero'])
-                
-            cursor.execute('''
-                INSERT INTO requisicoes 
-                (numero, cliente, vendedor, data_hora, status, items,
-                observacoes_vendedor, comprador_responsavel, data_hora_resposta,
-                justificativa_recusa, observacao_geral)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                req['numero'],
-                req['cliente'],
-                req['vendedor'],
-                req['data_hora'],
-                req['status'],
-                req['items'],
-                req.get('observacoes_vendedor', ''),
-                req.get('comprador_responsavel', ''),
-                req.get('data_hora_resposta', ''),
-                req.get('justificativa_recusa', ''),
-                req.get('observacao_geral', '')
-            ))
-        
-        # Atualiza o arquivo de controle do último número
-        with open('ultimo_numero.json', 'w') as f:
-            json.dump({'numero': ultimo_numero_atual}, f)
-            
-        conn.commit()
-        conn.close()
-        
-        # Recarrega dados na sessão
-        st.session_state.requisicoes = carregar_requisicoes()
-        st.success("Backup restaurado com sucesso!")
-        return True
-        
+        # Substitui os dados existentes pelos novos
+        ref_requisicoes.set(dados_backup)
+
+        # Atualiza o último número de requisição
+        ultimo_numero = max(int(req['numero']) for req in dados_backup.values())
+        db.reference('ultimo_numero').set(ultimo_numero)
+
+        st.success(f"Backup restaurado com sucesso! {len(dados_backup)} requisições importadas.")
+    
     except Exception as e:
         st.error(f"Erro ao restaurar backup: {str(e)}")
-        # Restaura backup preventivo em caso de erro
-        if os.path.exists(f'backups/pre_restore_{timestamp}.db'):
-            shutil.copy2(f'backups/pre_restore_{timestamp}.db', 'database/requisicoes.db')
-        return False
 
 def salvar_requisicao(requisicao):
-    conn = sqlite3.connect('database/requisicoes.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-    INSERT OR REPLACE INTO requisicoes 
-    (numero, cliente, vendedor, data_hora, status, items, observacoes_vendedor, 
-    comprador_responsavel, data_hora_resposta, justificativa_recusa, observacao_geral)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        requisicao['numero'],
-        requisicao['cliente'],
-        requisicao['vendedor'],
-        requisicao['data_hora'],
-        requisicao['status'],
-        json.dumps(requisicao['items']),
-        requisicao.get('observacoes_vendedor', ''),
-        requisicao.get('comprador_responsavel', ''),
-        requisicao.get('data_hora_resposta', ''),
-        requisicao.get('justificativa_recusa', ''),
-        requisicao.get('observacao_geral', '')
-    ))
-    conn.commit()
-    conn.close()
-    return True
+    try:
+        ref = db.reference(f'requisicoes/{requisicao["numero"]}')
+
+        # Garante a estrutura completa dos dados
+        dados_completos = {
+            'numero': requisicao['numero'],
+            'cliente': requisicao['cliente'],
+            'vendedor': requisicao['vendedor'],
+            'data_hora': requisicao['data_hora'],
+            'status': requisicao['status'],
+            'items': requisicao['items'],
+            'observacoes_vendedor': requisicao.get('observacoes_vendedor', ''),
+            'comprador_responsavel': requisicao.get('comprador_responsavel', ''),
+            'data_hora_resposta': requisicao.get('data_hora_resposta', ''),
+            'justificativa_recusa': requisicao.get('justificativa_recusa', ''),
+            'observacao_geral': requisicao.get('observacao_geral', '')
+        }
+
+        ref.set(dados_completos)
+        return True
+    except Exception as e:
+        st.error(f"Erro ao salvar requisição: {str(e)}")
+        return False
 
 def get_data_hora_brasil():
     try:
@@ -875,57 +821,36 @@ def enviar_email(destinatario, assunto, mensagem):
 
 def get_next_requisition_number():
     try:
-        # Conecta ao banco de dados
-        conn = sqlite3.connect('database/requisicoes.db')
-        cursor = conn.cursor()
-        
-        # Busca o maior número de requisição atual
-        cursor.execute('SELECT MAX(CAST(numero AS INTEGER)) FROM requisicoes')
-        ultimo_numero = cursor.fetchone()[0]
-        
-        # Se não houver registros, começa do 5000
+        ref = db.reference('ultimo_numero')
+        ultimo_numero = ref.get()
         if not ultimo_numero:
-            proximo_numero = 5000
-        else:
-            proximo_numero = int(ultimo_numero) + 1
-            
-        # Atualiza o arquivo de controle
-        with open('ultimo_numero.json', 'w') as f:
-            json.dump({'numero': proximo_numero}, f)
-            
-        conn.close()
+            ultimo_numero = 6148  # Começar do último número conhecido no backup
+        proximo_numero = int(ultimo_numero) + 1
+        ref.set(proximo_numero)
         return proximo_numero
-        
     except Exception as e:
         st.error(f"Erro ao gerar número da requisição: {str(e)}")
         return None
 
 def inicializar_numero_requisicao():
-    try:
-        with open('ultimo_numero.json', 'r') as f:
-            return json.load(f)['numero']
-    except FileNotFoundError:
-        with open('ultimo_numero.json', 'w') as f:
-            json.dump({'numero': 4999}, f)
-            return 4999
+    ref = db.reference('ultimo_numero')
+    if not ref.get():  # Se não existir no Firebase
+        ref.set(4999)
+    return ref.get()
 
 # Inicialização de dados
 if 'usuarios' not in st.session_state:
     st.session_state.usuarios = carregar_usuarios()
     verificar_diretorios()
-    if not os.path.exists('ultimo_numero.json'):
-        inicializar_numero_requisicao()
     if 'requisicoes' not in st.session_state:
-        importar_dados_antigos()
         st.session_state.requisicoes = carregar_requisicoes()
-
-# Adicionar aqui a inicialização dos perfis
+# Inicialização dos perfis
 if 'perfis' not in st.session_state:
-    try:
-        with open('perfis.json', 'r') as f:
-            st.session_state.perfis = json.load(f)
-    except FileNotFoundError:
-        st.session_state.perfis = {
+    ref_perfis = db.reference('perfis')
+    perfis = ref_perfis.get()
+
+    if not perfis:  # Cria perfis padrão se não existirem
+        perfis_padrao = {
             'vendedor': {
                 'dashboard': True,
                 'requisicoes': True,
@@ -957,7 +882,11 @@ if 'perfis' not in st.session_state:
                 'editar_perfis': True
             }
         }
-        
+        ref_perfis.set(perfis_padrao)
+        st.session_state.perfis = perfis_padrao
+    else:
+        st.session_state.perfis = perfis
+
 def tela_login():
     st.markdown("""
         <style>
@@ -972,73 +901,70 @@ def tela_login():
         }
         </style>
     """, unsafe_allow_html=True)
-    
+
     st.title("PORTAL - JETFRIO")
     usuario = st.text_input("Usuário", key="usuario_input").upper()
-    
+
     if usuario:
-        if usuario in st.session_state.usuarios:
-            user_data = st.session_state.usuarios[usuario]
-            
-            if user_data.get('senha') is None or user_data.get('primeiro_acesso', True):
+        ref_usuarios = db.reference('usuarios')
+        user_data = ref_usuarios.child(usuario).get()
+
+        if user_data:
+            if user_data.get('senha') is None or user_data.get(
+                    'primeiro_acesso', True):
                 st.markdown("### 😊 Primeiro Acesso - Configure sua senha")
                 with st.form("primeiro_acesso_form"):
-                    nova_senha = st.text_input("Nova Senha", type="password", 
-                        help="Mínimo 8 caracteres, incluindo letra maiúscula, minúscula e número")
-                    confirma_senha = st.text_input("Confirme a Nova Senha", type="password")
-                    
+                    nova_senha = st.text_input("Nova Senha", type="password",
+                                               help="Mínimo 8 caracteres, incluindo letra maiúscula, minúscula e número")
+                    confirma_senha = st.text_input(
+                        "Confirme a Nova Senha", type="password")
+
                     if st.form_submit_button("Cadastrar Senha"):
                         if len(nova_senha) < 8:
                             st.error("A senha deve ter no mínimo 8 caracteres")
                             return
-                            
+
                         if nova_senha != confirma_senha:
                             st.error("As senhas não coincidem")
                             return
-                            
-                        st.session_state.usuarios[usuario]['senha'] = gerar_hash_senha(nova_senha)
-                        st.session_state.usuarios[usuario]['primeiro_acesso'] = False
-                        st.session_state.usuarios[usuario]['data_ultimo_acesso'] = get_data_hora_brasil()
-                        if salvar_usuarios():
-                            st.success("Senha cadastrada com sucesso!")
-                            time.sleep(1)
-                            st.rerun()
 
-            else:
-                senha = st.text_input("Senha", type="password", key="senha_input")
-                col1, col2 = st.columns([1, 1])
-                
-                with col1:
-                    if st.button("Entrar", use_container_width=True, type="primary"):
-                        if not user_data.get('ativo', True):
-                            st.error("USUÁRIO INATIVO - CONTATE O ADMINISTRADOR")
-                            return
-                        
-                        senha_digitada_hash = gerar_hash_senha(senha)
-                        senha_armazenada = user_data['senha']
-                        
-                        # Se a senha armazenada não for hash, compara diretamente
-                        if len(senha_armazenada) != 64:  # Tamanho do hash SHA-256
-                            if senha != senha_armazenada:
-                                st.error("Senha incorreta")
-                                return
-                            # Atualiza para o formato hash
-                            st.session_state.usuarios[usuario]['senha'] = senha_digitada_hash
-                            salvar_usuarios()
-                        else:
-                            # Compara os hashes
-                            if senha_digitada_hash != senha_armazenada:
-                                st.error("Senha incorreta")
-                                return
-                            
-                        st.session_state['usuario'] = usuario
-                        st.session_state['perfil'] = user_data['perfil']
-                        st.session_state.usuarios[usuario]['data_ultimo_acesso'] = get_data_hora_brasil()
-                        salvar_usuarios()
-                        st.success(f"Bem-vindo, {usuario}!")
+                        user_data['senha'] = gerar_hash_senha(nova_senha)
+                        user_data['primeiro_acesso'] = False
+                        user_data['data_ultimo_acesso'] = get_data_hora_brasil()
+                        ref_usuarios.child(usuario).update(user_data)
+                        st.success("Senha cadastrada com sucesso!")
                         time.sleep(1)
                         st.rerun()
 
+            else:
+                senha = st.text_input(
+                    "Senha", type="password", key="senha_input")
+                col1, col2 = st.columns([1, 1])
+
+                with col1:
+                    if st.button("Entrar", use_container_width=True,
+                                 type="primary"):
+                        if not user_data.get('ativo', True):
+                            st.error(
+                                "USUÁRIO INATIVO - CONTATE O ADMINISTRADOR")
+                            return
+
+                        senha_digitada_hash = gerar_hash_senha(senha)
+                        senha_armazenada = user_data['senha']
+
+                        if senha_digitada_hash != senha_armazenada:
+                            st.error("Senha incorreta")
+                            return
+
+                        st.session_state['usuario'] = usuario
+                        st.session_state['perfil'] = user_data['perfil']
+                        user_data['data_ultimo_acesso'] = get_data_hora_brasil()
+                        ref_usuarios.child(usuario).update(user_data)
+                        st.success(f"Bem-vindo, {usuario}!")
+                        time.sleep(1)
+                        st.rerun()
+        else:
+            st.error("Usuário não encontrado")
 
 def menu_lateral():
     with st.sidebar:
@@ -1099,28 +1025,32 @@ def menu_lateral():
 
         st.markdown("### Menu")
         st.markdown("---")
-        
+
         menu_items = ["📊 Dashboard", "📝 Requisições", "⚙️ Configurações"]
-        if st.session_state['perfil'] in ['administrador', 'comprador']:
+        perfil = st.session_state.get('perfil', '').lower()
+        if perfil in ['administrador', 'comprador']:
             menu_items.insert(-1, "🛒 Cotações")
             menu_items.insert(-1, "✈️ Importação")
-        
+
         menu = st.radio("", menu_items, label_visibility="collapsed")
-        
-        st.markdown("<div style='flex-grow: 1;'></div>", unsafe_allow_html=True)
-        
+
+        st.markdown(
+            "<div style='flex-grow: 1;'></div>",
+            unsafe_allow_html=True)
+
         st.markdown(
             f"""
             <div class="user-info">
                 <p style='margin: 0; font-size: 0.9rem; white-space: nowrap;'>👤 <b>Usuário:</b> {st.session_state.get('usuario', '')}</p>
-                <p style='margin: 0; font-size: 0.9rem;'>🔑 <b>Perfil:</b> {st.session_state.get('perfil', '').title()}</p>
+                <p style='margin: 0; font-size: 0.9rem;'>🔑 <b>Perfil:</b> {perfil.title()}</p>
             </div>
-            """, 
+            """,
             unsafe_allow_html=True
         )
-        
+
         with st.container():
-            if st.button("🚪 Sair", key="logout_button", use_container_width=False):
+            if st.button("🚪 Sair", key="logout_button",
+                         use_container_width=False):
                 for key in list(st.session_state.keys()):
                     del st.session_state[key]
                 st.rerun()
@@ -1128,28 +1058,33 @@ def menu_lateral():
         return menu.split(" ")[-1]
 
 def dashboard():
-    if 'requisicoes' not in st.session_state:
-        st.session_state.requisicoes = carregar_requisicoes()
-    
+    if not st.session_state.perfis.get(st.session_state['perfil'].lower(), {}).get('dashboard', True):
+        st.warning("Você não tem permissão para acessar esta tela")
+        return
+
     # Definição dos ícones e cores dos status com transparência
     status_config = {
         'ABERTA': {'icon': '📋', 'cor': 'rgba(46, 204, 113, 0.7)'},  # Verde
-        'EM ANDAMENTO': {'icon': '⏳', 'cor': 'rgba(241, 196, 15, 0.7)'},  # Amarelo
+        # Amarelo
+        'EM ANDAMENTO': {'icon': '⏳', 'cor': 'rgba(241, 196, 15, 0.7)'},
         'FINALIZADA': {'icon': '✅', 'cor': 'rgba(52, 152, 219, 0.7)'},  # Azul
         'RECUSADA': {'icon': '🚫', 'cor': 'rgba(231, 76, 60, 0.7)'},  # Vermelho
         'TOTAL': {'icon': '📉', 'cor': 'rgba(149, 165, 166, 0.7)'}  # Cinza
     }
-    
+
     # Filtrar requisições baseado no perfil do usuário
     if st.session_state['perfil'] == 'vendedor':
-        requisicoes_filtradas = [r for r in st.session_state.requisicoes if r['vendedor'] == st.session_state['usuario']]
-        st.info(f"Visualizando requisições do vendedor: {st.session_state['usuario']}")
+        requisicoes_filtradas = [
+            r for r in st.session_state.requisicoes if r['vendedor'] == st.session_state['usuario']]
+        st.info(
+            f"Visualizando requisições do vendedor: {
+                st.session_state['usuario']}")
     else:
         requisicoes_filtradas = st.session_state.requisicoes
-    
+
     # Container principal com duas colunas
     col_metricas, col_grafico = st.columns([1, 2])
-    
+
     # Coluna das métricas com container fixo
     with col_metricas:
         st.markdown("""
@@ -1188,22 +1123,26 @@ def dashboard():
             }
             </style>
         """, unsafe_allow_html=True)
-        
+
         with st.container():
             # Contadores com ícones
-            abertas = len([r for r in requisicoes_filtradas if r['status'] == 'ABERTA'])
-            em_andamento = len([r for r in requisicoes_filtradas if r['status'] == 'EM ANDAMENTO'])
-            finalizadas = len([r for r in requisicoes_filtradas if r['status'] in ['FINALIZADA', 'RESPONDIDA']])
-            recusadas = len([r for r in requisicoes_filtradas if r['status'] == 'RECUSADA'])
+            status_counts = {
+                'ABERTA': 0,
+                'EM ANDAMENTO': 0,
+                'FINALIZADA': 0,
+                'RECUSADA': 0
+            }
+
+            for r in requisicoes_filtradas:
+                status = r['status']
+                if status in ['FINALIZADA', 'RESPONDIDA']:
+                    status_counts['FINALIZADA'] += 1
+                elif status in status_counts:
+                    status_counts[status] += 1
+
             total = len(requisicoes_filtradas)
 
-            for status, valor in [
-                ('ABERTA', abertas),
-                ('EM ANDAMENTO', em_andamento),
-                ('FINALIZADA', finalizadas),
-                ('RECUSADA', recusadas),
-                ('TOTAL', total)
-            ]:
+            for status, valor in status_counts.items():
                 st.markdown(f"""
                     <div class="status-box" style="background-color: {status_config[status]['cor']};">
                         <span class="status-icon">{status_config[status]['icon']}</span>
@@ -1212,44 +1151,49 @@ def dashboard():
                     </div>
                 """, unsafe_allow_html=True)
 
+            # Adicionar o total
+            st.markdown(f"""
+                <div class="status-box" style="background-color: {status_config['TOTAL']['cor']};">
+                    <span class="status-icon">{status_config['TOTAL']['icon']}</span>
+                    <span class="status-text">TOTAL</span>
+                    <span class="status-value">{total}</span>
+                </div>
+            """, unsafe_allow_html=True)
+
     # Coluna do gráfico
     with col_grafico:
         # Criar duas colunas dentro da coluna do gráfico
         col_vazia, col_filtro = st.columns([3, 1])
-        
+
         # Coluna do filtro (direita)
         with col_filtro:
-            st.markdown('<div style="margin-top: 0px;">', unsafe_allow_html=True)
+            st.markdown(
+                '<div style="margin-top: 0px;">',
+                unsafe_allow_html=True)
             periodo = st.selectbox(
                 "PERÍODO",
                 ["ÚLTIMOS 7 DIAS", "HOJE", "ÚLTIMOS 30 DIAS", "ÚLTIMOS 6 MESES"],
                 index=0
             )
             st.markdown('</div>', unsafe_allow_html=True)
-        
+
         # Coluna do gráfico (esquerda)
         with col_vazia:
             try:
                 import plotly.graph_objects as go
-                
+
                 # Dados para o gráfico
-                dados_grafico = []
-                if abertas > 0:
-                    dados_grafico.append(('Abertas', abertas, status_config['ABERTA']['cor']))
-                if em_andamento > 0:
-                    dados_grafico.append(('Em Andamento', em_andamento, status_config['EM ANDAMENTO']['cor']))
-                if finalizadas > 0:
-                    dados_grafico.append(('Finalizadas', finalizadas, status_config['FINALIZADA']['cor']))
-                if recusadas > 0:
-                    dados_grafico.append(('Recusadas', recusadas, status_config['RECUSADA']['cor']))
+                dados_grafico = [
+                    (status, valor, status_config[status]['cor'])
+                    for status, valor in status_counts.items()
+                    if valor > 0
+                ]
 
                 # Se não houver dados, incluir todos os status com valor 0
                 if not dados_grafico:
                     dados_grafico = [
-                        ('Abertas', 0, status_config['ABERTA']['cor']),
-                        ('Em Andamento', 0, status_config['EM ANDAMENTO']['cor']),
-                        ('Finalizadas', 0, status_config['FINALIZADA']['cor']),
-                        ('Recusadas', 0, status_config['RECUSADA']['cor'])
+                        (status, 0, status_config[status]['cor'])
+                        for status in status_counts.keys()
                     ]
 
                 labels = [d[0] for d in dados_grafico]
@@ -1290,14 +1234,19 @@ def dashboard():
 
                 st.plotly_chart(fig, use_container_width=True)
             except ImportError:
-                st.error("Biblioteca Plotly não encontrada. Execute 'pip install plotly' para instalar.")
+                st.error(
+                    "Biblioteca Plotly não encontrada. Execute 'pip install plotly' para instalar.")
 
     # Tabela detalhada em toda a largura
     st.markdown("### Requisições Detalhadas")
     if requisicoes_filtradas:
         # Ordenar requisições por número em ordem decrescente
-        requisicoes_filtradas = sorted(requisicoes_filtradas, key=lambda x: x['numero'], reverse=True)
-        
+        requisicoes_filtradas = sorted(requisicoes_filtradas,
+                                       key=lambda x: int(
+                                           # Garante ordenação numérica correta
+                                           x['numero']),
+                                       reverse=True)
+
         df_requisicoes = pd.DataFrame([{
             'Número': f"{req['numero']}",
             'Data/Hora Criação': req['data_hora'],
@@ -1307,7 +1256,7 @@ def dashboard():
             'Comprador': req.get('comprador_responsavel', '-'),
             'Data/Hora Resposta': req.get('data_hora_resposta', '-')
         } for req in requisicoes_filtradas])
-        
+
         st.dataframe(
             df_requisicoes,
             hide_index=True,
@@ -1328,12 +1277,13 @@ def dashboard():
 def nova_requisicao():
     # Inicializa a variável de observações no início da função
     observacoes_vendedor = ""
-    
+
     if st.session_state.get('modo_requisicao') != 'nova':
         st.title("REQUISIÇÕES")
-        col1, col2 = st.columns([4,1])
+        col1, col2 = st.columns([4, 1])
         with col2:
-            if st.button("🎯 NOVA REQUISIÇÃO", type="primary", use_container_width=True):
+            if st.button("🎯 NOVA REQUISIÇÃO", type="primary",
+                         use_container_width=True):
                 st.session_state['modo_requisicao'] = 'nova'
                 if 'items_temp' not in st.session_state:
                     st.session_state.items_temp = []
@@ -1341,141 +1291,19 @@ def nova_requisicao():
         return
 
     st.title("NOVA REQUISIÇÃO")
-    col1, col2 = st.columns([1.5,1])
+    col1, col2 = st.columns([1.5, 1])
     with col1:
         cliente = st.text_input("CLIENTE", key="cliente").upper()
     with col2:
         st.write(f"**VENDEDOR:** {st.session_state.get('usuario', '')}")
 
-    col1, col2 = st.columns(2)
-    with col2:
-        if st.button("❌ CANCELAR", type="secondary", use_container_width=True):
-            st.session_state.items_temp = []
-            st.session_state['modo_requisicao'] = None
-            st.rerun()
-
     if st.session_state.get('show_qtd_error'):
-        st.markdown('<p style="color: #ff4b4b; margin: 0; padding: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">PREENCHIMENTO OBRIGATÓRIO: QUANTIDADE</p>', unsafe_allow_html=True)
+        st.markdown(
+            '<p style="color: #ff4b4b; margin: 0; padding: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">PREENCHIMENTO OBRIGATÓRIO: QUANTIDADE</p>',
+            unsafe_allow_html=True)
 
     if 'items_temp' not in st.session_state:
         st.session_state.items_temp = []
-
-    st.markdown("""
-    <style>
-    .requisicao-table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-bottom: 0;
-        table-layout: fixed;
-        font-size: 14px;
-    }
-    .requisicao-table th, .requisicao-table td {
-        border: 2px solid #2D2C74 !important;
-        padding: 1px !important;
-        text-align: center;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        font-size: 14px;
-        line-height: 2 !important;
-        background-color: var(--background-color);
-        color: var(--text-color);
-    }
-    .requisicao-table th {
-        background-color: white;
-        border: 2px solid #2D2C74;
-        color: #2D2C74;
-        font-weight: 600;
-        height: 32px !important;
-        text-align: center !important;
-        font-size: 15px;
-        text-transform: uppercase;
-    }
-    .stTextInput > div > div > input {
-        border-radius: 4px !important;
-        border: 1px solid var(--secondary-background-color) !important;
-        padding: 2px 6px !important;
-        height: 38px !important;
-        background-color: var(--background-color) !important;
-        color: var(--text-color) !important;
-        font-size: 14px !important;
-        margin: 0 !important;
-        min-height: 38px !important;
-    }
-    .stTextInput > div > div > input:focus {
-        border-color: var(--primary-color) !important;
-        box-shadow: 0 0 0 1px var(--primary-color) !important;
-    }
-    .stTextInput.desc-input > div > div > input {
-        text-align: left !important;
-        padding-left: 8px !important;
-    }
-    .stTextInput:not(.desc-input) > div > div > input {
-        text-align: center !important;
-    }
-    div[data-testid="column"] {
-        padding: 0 !important;
-        margin: 2 !important;
-    }
-    .stButton > button {
-        border: 1px solid #2D2C74 !important;
-        padding: 2px !important;
-        height: 10px !important;
-        min-width: 10px !important;
-        width: 10px !important;
-        line-height: 1 !important;
-        font-size: 12px !important;
-        display: inline-flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        background-color: #2D2C74 !important;
-        color: white !important;
-        margin: 0 2px !important;
-    }
-    .stButton > button:hover {
-        background-color: #1B81C5 !important;
-        border-color: #1B81C5 !important;
-        color: white !important;
-    }
-    .stButton > button[kind="primary"] {
-        width: auto !important;
-        padding: 0 16px !important;
-        height: 32px !important;
-        font-size: 14px !important;
-        border: 2px solid #2D2C74 !important;
-    }
-    .stButton > button[kind="secondary"] {
-        width: auto !important;
-        padding: 0 16px !important;
-        height: 32px !important;
-        font-size: 14px !important;
-        border: 2px solid #2D2C74 !important;
-    }
-    [data-testid="stHorizontalBlock"] {
-        gap: 0px !important;
-        padding: 0 !important;
-        margin-bottom: 2px !important;
-    }
-    div.row-widget.stButton {
-        display: inline-block !important;
-        margin: 0 2px !important;
-    }
-    div.row-widget {
-        margin-bottom: 2px !important;
-    }
-    div[data-testid="column"] > div {
-        padding-top: 0 !important;
-        padding-bottom: 0 !important;
-    }
-    [data-testid="column"] [data-testid="column"] {
-        padding: 0 1px !important;
-        margin: 0 !important;
-        display: flex !important;
-        flex-direction: row !important;
-        align-items: center !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
 
     st.markdown("### ITENS DA REQUISIÇÃO")
     st.markdown("""
@@ -1493,46 +1321,100 @@ def nova_requisicao():
     </thead>
     </table>
     """, unsafe_allow_html=True)
-
     if st.session_state.items_temp:
         for idx, item in enumerate(st.session_state.items_temp):
             cols = st.columns([0.5, 1.5, 2, 3.5, 1.5, 0.5, 0.5])
             editing = st.session_state.get('editing_item') == idx
 
             with cols[0]:
-                st.text_input("", value=str(item['item']), disabled=True, key=f"item_{idx}", label_visibility="collapsed")
+                st.text_input(
+                    "",
+                    value=str(
+                        item['item']),
+                    disabled=True,
+                    key=f"item_{idx}",
+                    label_visibility="collapsed")
             with cols[1]:
                 if editing:
-                    item['codigo'] = st.text_input("", value=item['codigo'], key=f"codigo_edit_{idx}", label_visibility="collapsed").upper()
+                    item['codigo'] = st.text_input(
+                        "",
+                        value=item['codigo'],
+                        key=f"codigo_edit_{idx}",
+                        label_visibility="collapsed").upper()
                 else:
-                    st.text_input("", value=item['codigo'], disabled=True, key=f"codigo_{idx}", label_visibility="collapsed")
+                    st.text_input(
+                        "",
+                        value=item['codigo'],
+                        disabled=True,
+                        key=f"codigo_{idx}",
+                        label_visibility="collapsed")
             with cols[2]:
                 if editing:
-                    item['cod_fabricante'] = st.text_input("", value=item['cod_fabricante'], key=f"fab_edit_{idx}", label_visibility="collapsed").upper()
+                    item['cod_fabricante'] = st.text_input(
+                        "",
+                        value=item['cod_fabricante'],
+                        key=f"fab_edit_{idx}",
+                        label_visibility="collapsed").upper()
                 else:
-                    st.text_input("", value=item['cod_fabricante'], disabled=True, key=f"fab_{idx}", label_visibility="collapsed")
+                    st.text_input(
+                        "",
+                        value=item['cod_fabricante'],
+                        disabled=True,
+                        key=f"fab_{idx}",
+                        label_visibility="collapsed")
             with cols[3]:
                 if editing:
-                    item['descricao'] = st.text_input("", value=item['descricao'], key=f"desc_edit_{idx}", label_visibility="collapsed", help="desc-input").upper()
+                    item['descricao'] = st.text_input(
+                        "",
+                        value=item['descricao'],
+                        key=f"desc_edit_{idx}",
+                        label_visibility="collapsed",
+                        help="desc-input").upper()
                 else:
-                    st.text_input("", value=item['descricao'], disabled=True, key=f"desc_{idx}", label_visibility="collapsed", help="desc-input")
+                    st.text_input(
+                        "",
+                        value=item['descricao'],
+                        disabled=True,
+                        key=f"desc_{idx}",
+                        label_visibility="collapsed",
+                        help="desc-input")
             with cols[4]:
                 if editing:
-                    item['marca'] = st.text_input("", value=item['marca'], key=f"marca_edit_{idx}", label_visibility="collapsed").upper()
+                    item['marca'] = st.text_input(
+                        "",
+                        value=item['marca'],
+                        key=f"marca_edit_{idx}",
+                        label_visibility="collapsed").upper()
                 else:
-                    st.text_input("", value=item['marca'], disabled=True, key=f"marca_{idx}", label_visibility="collapsed")
+                    st.text_input(
+                        "",
+                        value=item['marca'],
+                        disabled=True,
+                        key=f"marca_{idx}",
+                        label_visibility="collapsed")
             with cols[5]:
                 if editing:
-                    quantidade = st.text_input("", value=str(item['quantidade']), key=f"qtd_edit_{idx}", label_visibility="collapsed")
+                    quantidade = st.text_input(
+                        "",
+                        value=str(
+                            item['quantidade']),
+                        key=f"qtd_edit_{idx}",
+                        label_visibility="collapsed")
                     try:
                         quantidade_float = float(quantidade.replace(',', '.'))
                         item['quantidade'] = quantidade_float
                     except ValueError:
                         pass
                 else:
-                    st.text_input("", value=str(item['quantidade']), disabled=True, key=f"qtd_{idx}", label_visibility="collapsed")
+                    st.text_input(
+                        "",
+                        value=str(
+                            item['quantidade']),
+                        disabled=True,
+                        key=f"qtd_{idx}",
+                        label_visibility="collapsed")
             with cols[6]:
-                col1, col2 = st.columns([1,1])
+                col1, col2 = st.columns([1, 1])
                 with col1:
                     if editing:
                         if st.button("✅", key=f"save_{idx}"):
@@ -1545,24 +1427,45 @@ def nova_requisicao():
                 with col2:
                     if not editing and st.button("❌", key=f"remove_{idx}"):
                         st.session_state.items_temp.pop(idx)
-                        for i, item in enumerate(st.session_state.items_temp, 1):
+                        for i, item in enumerate(
+                                st.session_state.items_temp, 1):
                             item['item'] = i
                         st.rerun()
 
     proximo_item = len(st.session_state.items_temp) + 1
     cols = st.columns([0.5, 1.5, 2, 3.5, 1.5, 0.5, 0.5])
     with cols[0]:
-        st.text_input("", value=str(proximo_item), disabled=True, key=f"item_{proximo_item}", label_visibility="collapsed")
+        st.text_input(
+            "",
+            value=str(proximo_item),
+            disabled=True,
+            key=f"item_{proximo_item}",
+            label_visibility="collapsed")
     with cols[1]:
-        codigo = st.text_input("", key=f"codigo_{proximo_item}", label_visibility="collapsed").upper()
+        codigo = st.text_input(
+            "",
+            key=f"codigo_{proximo_item}",
+            label_visibility="collapsed").upper()
     with cols[2]:
-        cod_fabricante = st.text_input("", key=f"cod_fab_{proximo_item}", label_visibility="collapsed").upper()
+        cod_fabricante = st.text_input("",
+                                       key=f"cod_fab_{proximo_item}",
+                                       label_visibility="collapsed").upper()
     with cols[3]:
-        descricao = st.text_input("", key=f"desc_{proximo_item}", label_visibility="collapsed", help="desc-input").upper()
+        descricao = st.text_input(
+            "",
+            key=f"desc_{proximo_item}",
+            label_visibility="collapsed",
+            help="desc-input").upper()
     with cols[4]:
-        marca = st.text_input("", key=f"marca_{proximo_item}", label_visibility="collapsed").upper()
+        marca = st.text_input(
+            "",
+            key=f"marca_{proximo_item}",
+            label_visibility="collapsed").upper()
     with cols[5]:
-        quantidade = st.text_input("", key=f"qtd_{proximo_item}", label_visibility="collapsed")
+        quantidade = st.text_input(
+            "",
+            key=f"qtd_{proximo_item}",
+            label_visibility="collapsed")
     with cols[6]:
         if st.button("➕", key=f"add_{proximo_item}"):
             if not descricao:
@@ -1591,7 +1494,7 @@ def nova_requisicao():
     if st.session_state.items_temp:
         # Checkbox para mostrar campo de observações
         mostrar_obs = st.checkbox("INCLUIR OBSERVAÇÕES")
-        
+
         # Campo de observações só aparece se o checkbox estiver marcado
         if mostrar_obs:
             st.markdown("### OBSERVAÇÕES")
@@ -1603,13 +1506,19 @@ def nova_requisicao():
         else:
             observacoes_vendedor = ""  # Valor padrão quando não há observações
 
-        col1, col2 = st.columns(2)
+        # Container para os botões CANCELAR e ENVIAR alinhados
+        col1, col2 = st.columns([1, 1])
         with col1:
+            if st.button("❌ CANCELAR", type="secondary", use_container_width=True):
+                st.session_state.items_temp = []
+                st.session_state['modo_requisicao'] = None
+                st.rerun()
+        with col2:
             if st.button("✅ ENVIAR", type="primary", use_container_width=True):
                 if not cliente:
                     st.error("PREENCHIMENTO OBRIGATÓRIO: CLIENTE")
                     return
-                
+
                 nova_req = {
                     'numero': get_next_requisition_number(),
                     'cliente': cliente,
@@ -1617,9 +1526,13 @@ def nova_requisicao():
                     'data_hora': get_data_hora_brasil(),
                     'status': 'ABERTA',
                     'items': st.session_state.items_temp.copy(),
-                    'observacoes_vendedor': observacoes_vendedor
+                    'observacoes_vendedor': observacoes_vendedor,
+                    'comprador_responsavel': '',
+                    'data_hora_resposta': '',
+                    'justificativa_recusa': '',
+                    'observacao_geral': ''
                 }
-                
+
                 if salvar_requisicao(nova_req):
                     # Limpar os dados temporários
                     st.session_state.items_temp = []
@@ -1630,21 +1543,53 @@ def nova_requisicao():
 
                     # Exibir toast de sucesso
                     st.toast('Requisição enviada com sucesso!', icon='✅')
-                    
+
                     # Aguardar brevemente antes de recarregar
                     time.sleep(1)
                     st.rerun()
-                
+
 def salvar_configuracoes():
     try:
-        with open('configuracoes.json', 'w') as f:
-            json.dump(st.session_state.config_sistema, f)
+        # Referência para o nó de configurações no Firebase
+        ref = db.reference('configuracoes')
+        # Salva as configurações no Firebase
+        ref.set(st.session_state.config_sistema)
     except Exception as e:
         st.error(f"Erro ao salvar configurações: {e}")
+
+def toggle_detalhes(numero_requisicao):
+    """Alterna a exibição dos detalhes de uma requisição"""
+    if st.session_state.get(f'mostrar_detalhes_{numero_requisicao}', False):
+        st.session_state.pop(f'mostrar_detalhes_{numero_requisicao}')
+    else:
+        # Fecha qualquer outro detalhe aberto
+        for key in list(st.session_state.keys()):
+            if key.startswith('mostrar_detalhes_'):
+                st.session_state.pop(key)
+        st.session_state[f'mostrar_detalhes_{numero_requisicao}'] = True
+
+def toggle_detalhes(numero_requisicao):
+    """Alterna a exibição dos detalhes de uma requisição"""
+    if st.session_state.get(f'mostrar_detalhes_{numero_requisicao}', False):
+        st.session_state.pop(f'mostrar_detalhes_{numero_requisicao}')
+    else:
+        # Fecha qualquer outro detalhe aberto
+        for key in list(st.session_state.keys()):
+            if key.startswith('mostrar_detalhes_'):
+                st.session_state.pop(key)
+        st.session_state[f'mostrar_detalhes_{numero_requisicao}'] = True
 
 def requisicoes():
     st.title("REQUISIÇÕES")
     
+    # Configurações de cores mais saturadas
+    status_config = {
+        'ABERTA': {'icon': '🔓', 'color': 'rgba(46, 204, 113, 0.3)', 'border': '#2ecc71'},
+        'EM ANDAMENTO': {'icon': '🔄', 'color': 'rgba(241, 196, 15, 0.3)', 'border': '#f39c12'},
+        'FINALIZADA': {'icon': '✅', 'color': 'rgba(52, 152, 219, 0.3)', 'border': '#3498db'},
+        'RECUSADA': {'icon': '❌', 'color': 'rgba(231, 76, 60, 0.3)', 'border': '#e74c3c'}
+    }
+
     # Atualização automática
     if 'ultima_atualizacao' not in st.session_state:
         st.session_state.ultima_atualizacao = time.time()
@@ -1653,6 +1598,12 @@ def requisicoes():
         st.session_state.requisicoes = carregar_requisicoes()
         st.session_state.ultima_atualizacao = time.time()
         st.rerun()
+
+    # Inicializar paginação
+    if 'pagina_atual' not in st.session_state:
+        st.session_state.pagina_atual = 1
+    if 'itens_por_pagina' not in st.session_state:
+        st.session_state.itens_por_pagina = 10
 
     # Estilização
     st.markdown("""
@@ -1669,7 +1620,7 @@ def requisicoes():
             padding: 4px;
             border-radius: 8px;
             margin-bottom: 4px;
-            border-left: 4px solid #2D2C74;
+            border-left: 4px solid;
             transition: all 0.3s ease;
         }
         .requisicao-card.expandido {
@@ -1699,6 +1650,9 @@ def requisicoes():
             border-radius: 12px;
             font-size: 12px;
             font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
         }
         .status-aberta { background-color: #e3f2fd; color: #1976d2; }
         .status-andamento { background-color: #fff3e0; color: #f57c00; }
@@ -1812,6 +1766,34 @@ def requisicoes():
             background-color: #c62828 !important;
             color: white !important;
         }
+        .paginacao-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+            margin-top: 20px;
+            padding: 12px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+        }
+        .item-resposta {
+            background-color: #f0f8ff;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 5px 0;
+        }
+        .resposta-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .justificativa-box {
+            background-color: #ffebee;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
         </style>
     """, unsafe_allow_html=True)
     
@@ -1836,28 +1818,35 @@ def requisicoes():
             with col2:
                 cliente_busca = st.text_input("👥 CLIENTE", key="busca_cliente")
             with col3:
-                data_col1, data_col2 = st.columns(2)
-                with data_col1:
-                    data_inicial = st.date_input("DATA INICIAL", value=None, key="data_inicial")
-                with data_col2:
-                    data_final = st.date_input("DATA FINAL", value=None, key="data_final")
+                produto_busca = st.text_input("📦 PRODUTO", key="busca_produto")
             with col4:
                 st.markdown("<br>", unsafe_allow_html=True)
                 buscar = st.button("🔎 BUSCAR", type="primary", use_container_width=True)
 
-            # Status como chips coloridos
-            status_opcoes = {
-                "ABERTA": "🔵",
-                "EM ANDAMENTO": "🟡",
-                "FINALIZADA": "🟢",
-                "RECUSADA": "🔴"
-            }
-            selected_status = st.multiselect(
-                "STATUS",
-                options=list(status_opcoes.keys()),
-                default=["ABERTA", "EM ANDAMENTO"] if st.session_state['perfil'] != 'vendedor' else list(status_opcoes.keys()),
-                format_func=lambda x: f"{status_opcoes[x]} {x}"
-            )
+            # Segunda linha de filtros
+            col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
+            with col1:
+                status_opcoes = {
+                    "ABERTA": "🔓 ABERTA",
+                    "EM ANDAMENTO": "🔄 EM ANDAMENTO",
+                    "FINALIZADA": "✅ FINALIZADA",
+                    "RECUSADA": "❌ RECUSADA"
+                }
+                selected_status = st.multiselect(
+                    "STATUS",
+                    options=list(status_opcoes.keys()),
+                    default=["ABERTA", "EM ANDAMENTO"] if st.session_state['perfil'] != 'vendedor' else list(status_opcoes.keys()),
+                    format_func=lambda x: status_opcoes[x]
+                )
+            with col2:
+                data_inicial = st.date_input("📅 DE", value=None, key="data_inicial")
+            with col3:
+                data_final = st.date_input("📅 ATÉ", value=None, key="data_final")
+            with col4:
+                if st.button("🔄 LIMPAR", type="secondary", use_container_width=True):
+                    st.session_state.pagina_atual = 1
+                    st.rerun()
+            
             st.markdown('</div>', unsafe_allow_html=True)
 
         # Lógica de filtragem e exibição
@@ -1867,331 +1856,277 @@ def requisicoes():
         else:
             requisicoes_visiveis = st.session_state.requisicoes.copy()
 
-        # Aplicar filtros
-        if buscar:
-            if numero_busca:
-                requisicoes_visiveis = [req for req in requisicoes_visiveis if str(numero_busca) in str(req['numero'])]
-            if cliente_busca:
-                requisicoes_visiveis = [req for req in requisicoes_visiveis if cliente_busca.upper() in req['cliente'].upper()]
-            if data_inicial and data_final:
-                data_inicial_str = data_inicial.strftime('%d/%m/%Y')
-                data_final_str = data_final.strftime('%d/%m/%Y')
-                requisicoes_visiveis = [req for req in requisicoes_visiveis if data_inicial_str <= req['data_hora'].split()[0] <= data_final_str]
+        # Garantir que o campo 'numero' seja convertido para inteiro
+        for req in requisicoes_visiveis:
+            try:
+                req['numero'] = int(req['numero'])
+            except ValueError:
+                st.warning(f"Número inválido na requisição: {req['numero']}")
 
-        if not requisicoes_visiveis:
-            st.warning("NENHUMA REQUISIÇÃO ENCONTRADA COM OS FILTROS SELECIONADOS.")
+        # Aplicar filtros
+        if numero_busca:
+            requisicoes_visiveis = [req for req in requisicoes_visiveis if str(numero_busca) in str(req['numero'])]
+        if cliente_busca:
+            requisicoes_visiveis = [req for req in requisicoes_visiveis if cliente_busca.upper() in req['cliente'].upper()]
+        if produto_busca:
+            requisicoes_visiveis = [req for req in requisicoes_visiveis 
+                                  if any(produto_busca.upper() in item.get('descricao', '').upper() 
+                                        or produto_busca.upper() in item.get('codigo', '').upper()
+                                        for item in req['items'])]
+        if data_inicial and data_final:
+            data_inicial_str = data_inicial.strftime('%d/%m/%Y')
+            data_final_str = data_final.strftime('%d/%m/%Y')
+            requisicoes_visiveis = [req for req in requisicoes_visiveis if data_inicial_str <= req['data_hora'].split()[0] <= data_final_str]
+
+        # Filtro de status
+        requisicoes_visiveis = [req for req in requisicoes_visiveis if req['status'] in selected_status]
 
         # Ordenação por número em ordem decrescente
         requisicoes_visiveis.sort(key=lambda x: x['numero'], reverse=True)
 
-        # Exibição das requisições
-        for idx, req in enumerate(requisicoes_visiveis):
-            if req['status'] in selected_status:
+        # Paginação
+        total_paginas = max(1, (len(requisicoes_visiveis) + st.session_state.itens_por_pagina - 1) // st.session_state.itens_por_pagina)
+        inicio = (st.session_state.pagina_atual - 1) * st.session_state.itens_por_pagina
+        fim = min(inicio + st.session_state.itens_por_pagina, len(requisicoes_visiveis))
+        requisicoes_paginadas = requisicoes_visiveis[inicio:fim]
+
+        # Exibição das requisições paginadas
+        for idx, req in enumerate(requisicoes_paginadas):
+            with st.form(key=f"form_{req['numero']}"):  # Envolve cada requisição em um form
+                status_info = status_config.get(req['status'], {})
                 st.markdown(f"""
-                    <div class="requisicao-card" style="background-color: {
-                        'rgba(46, 204, 113, 0.2)' if req['status'] == 'ABERTA'
-                        else 'rgba(241, 196, 15, 0.2)' if req['status'] == 'EM ANDAMENTO'
-                        else 'rgba(52, 152, 219, 0.2)' if req['status'] == 'FINALIZADA'
-                        else 'rgba(231, 76, 60, 0.2)' if req['status'] == 'RECUSADA'
-                        else 'var(--background-color)'};
-                        color: var(--text-color)">
-                        <div class="requisicao-info" style="color: var(--text-color)">
+                    <div class="requisicao-card" style="border-left-color: {status_info.get('border', '#2D2C74')}; 
+                                                      background-color: {status_info.get('color', 'white')}">
+                        <div class="requisicao-info">
                             <div>
-                                <span class="requisicao-numero" style="color: var(--text-color)"></span>
-                                <span class="requisicao-numero" style="color: var(--text-color)">{req['numero']}</span>
-                                <span class="requisicao-cliente" style="color: var(--text-color)">{req['cliente']}</span>
+                                <span class="requisicao-numero">{req['numero']}</span>
+                                <span class="requisicao-cliente">{req['cliente']}</span>
                             </div>
                             <div>
-                                <span class="status-badge status-{req['status'].lower()}">{req['status']}</span>
+                                <span class="status-badge" style="background-color: {status_info.get('color', '#f8f9fa')}; 
+                                                                  border: 1px solid {status_info.get('border', '#ddd')};">
+                                    {status_info.get('icon', '')} {req['status']}
+                                </span>
                             </div>
                         </div>
-                        <div class="requisicao-data" style="color: var(--text-color); display: flex; justify-content: space-between;">
+                        <div class="requisicao-data" style="display: flex; justify-content: space-between;">
                             <div>
-                                <span>CRIADO EM: {req['data_hora']}</span>
-                                <span>VENDEDOR: {req['vendedor']}</span>
+                                <span>📅 {req['data_hora'].split()[0]}</span>
+                                <span style="margin-left: 15px;">🕒 {req['data_hora'].split()[1]}</span>
+                                <span style="margin-left: 15px;">👤 {req['vendedor']}</span>
                             </div>
-                            <span>COMPRADOR: {req.get('comprador_responsavel', '-')}
+                            <span>👥 {req.get('comprador_responsavel', '-')}</span>
                         </div>
                     </div>
                 """, unsafe_allow_html=True)
 
-                if st.button(f"VER DETALHES", key=f"detalhes_{req['numero']}_{idx}"):
-                    for key in list(st.session_state.keys()):
-                        if key.startswith('mostrar_detalhes_') and key != f'mostrar_detalhes_{req["numero"]}':
-                            st.session_state.pop(key)
-                    st.session_state[f'mostrar_detalhes_{req["numero"]}'] = True
+                is_open = st.session_state.get(f'mostrar_detalhes_{req["numero"]}', False)
+                if st.form_submit_button(
+                    f"🔽 DETALHES" if is_open else f"▶️ DETALHES",
+                    help="Clique para expandir/recolher"
+                ):
+                    st.session_state[f'mostrar_detalhes_{req["numero"]}'] = not is_open
                     st.rerun()
 
-                if st.session_state.get(f'mostrar_detalhes_{req["numero"]}', False):
-                    with st.container():
-                        st.markdown("""
-                            <div class="detalhes-container" style="
-                                background-color: var(--background-color);
-                                color: var(--text-color) !important;
-                                border: 1px solid var(--secondary-background-color);">
-                        """, unsafe_allow_html=True)
-                        
-                        st.markdown("""
-                            <div class="detalhes-header" style="
-                                background-color: var(--background-color);
-                                color: var(--text-color) !important;
-                                border-bottom: 1px solid var(--secondary-background-color);">
-                        """, unsafe_allow_html=True)
-                        
-                        if req['status'] == 'ABERTA' and st.session_state['perfil'] in ['comprador', 'administrador']:
-                            col1, col2, col3, col4 = st.columns([2,1,1,1])
-                            with col2:
-                                if st.button("✅", key=f"aceitar_{req['numero']}", type="primary"):
-                                    req['status'] = 'EM ANDAMENTO'
-                                    req['comprador_responsavel'] = st.session_state['usuario']
-                                    req['data_hora_aceite'] = get_data_hora_brasil()
-                                    if salvar_requisicao(req):
-                                        st.success("Requisição aceita com sucesso!")
-                                        st.rerun()
-                            with col3:
-                                if st.button("❌", key=f"recusar_{req['numero']}", type="primary"):
-                                    st.session_state[f'mostrar_justificativa_{req["numero"]}'] = True
-                                    st.rerun()
-                            with col4:
-                                if st.button("FECHAR", key=f"fechar_{req['numero']}_{idx}"):
-                                    st.session_state.pop(f'mostrar_detalhes_{req["numero"]}')
-                                    st.rerun()
-                        else:
-                            col1, col2 = st.columns([3,1])
-                            with col2:
-                                if st.button("FECHAR", key=f"fechar_{req['numero']}_{idx}"):
-                                    st.session_state.pop(f'mostrar_detalhes_{req["numero"]}')
-                                    st.rerun()
-                        st.markdown('</div>', unsafe_allow_html=True)
+            if st.session_state.get(f'mostrar_detalhes_{req["numero"]}', False):
+                with st.container():
+                    st.markdown("""
+                        <div class="detalhes-container">
+                    """, unsafe_allow_html=True)
 
+                    # Cabeçalho com informações e botão FINALIZAR
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
                         st.markdown(f"""
-                            <div class="header-info" style="
-                                background-color: var(--background-color);
-                                color: var(--text-color) !important;
-                                border-bottom: 1px solid var(--secondary-background-color);">
+                            <div class="header-info">
                                 <div class="header-group">
-                                    <p style="color: var(--text-color) !important"><strong style="color: var(--text-color) !important">CRIADO EM:</strong> {req['data_hora']}</p>
-                                    <p style="color: var(--text-color) !important"><strong style="color: var(--text-color) !important">VENDEDOR:</strong> {req['vendedor']}</p>
+                                    <p><strong>CRIADO EM:</strong> {req['data_hora']}</p>
+                                    <p><strong>VENDEDOR:</strong> {req['vendedor']}</p>
                                 </div>
                                 <div class="header-group">
-                                    <p style="color: var(--text-color) !important"><strong style="color: var(--text-color) !important">RESPONDIDO EM:</strong> {req.get('data_hora_resposta','-')}</p>
-                                    <p style="color: var(--text-color) !important"><strong style="color: var(--text-color) !important">COMPRADOR:</strong> {req.get('comprador_responsavel', '-')}</p>
+                                    <p><strong>RESPONDIDO EM:</strong> {req.get('data_hora_resposta','-')}</p>
+                                    <p><strong>COMPRADOR:</strong> {req.get('comprador_responsavel', '-')}</p>
                                 </div>
                             </div>
                         """, unsafe_allow_html=True)
-
-                         # Campo de justificativa (aparece somente após clicar em recusar)
-                        if st.session_state.get(f'mostrar_justificativa_{req["numero"]}', False):
-                            st.markdown("### JUSTIFICATIVA DA RECUSA")
-                            justificativa = st.text_area(
-                                "Digite a justificativa da recusa",
-                                key=f"justificativa_{req['numero']}",
-                                height=100
-                            )
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                if st.button("CONFIRMAR RECUSA", key=f"confirmar_recusa_{req['numero']}", type="primary", use_container_width=True):
-                                    if not justificativa:
-                                        st.error("Por favor, informe a justificativa da recusa.")
-                                        return
-                                    
-                                    req['status'] = 'RECUSADA'
-                                    req['comprador_responsavel'] = st.session_state['usuario']
-                                    req['data_hora_resposta'] = get_data_hora_brasil()
-                                    req['justificativa_recusa'] = justificativa
-                                    
-                                    if salvar_requisicao(req):
-                                        try:
-                                            enviar_email_requisicao(req, "recusada")
-                                            st.success("Requisição recusada com sucesso!")
-                                            st.rerun()
-                                        except Exception as e:
-                                            st.error(f"Erro ao enviar notificação: {str(e)}")
-                                    
-                            with col2:
-                                if st.button("CANCELAR", key=f"cancelar_recusa_{req['numero']}", type="secondary", use_container_width=True):
-                                    st.session_state.pop(f'mostrar_justificativa_{req["numero"]}')
+                    
+                    with col2:
+                        if req['status'] == 'EM ANDAMENTO' and st.session_state['perfil'].lower() in ['comprador', 'administrador']:
+                            # Container com margem negativa para alinhar à direita
+                            st.markdown("""
+                                <div style="display: flex; justify-content: flex-end; margin-right: -20px;">
+                            """, unsafe_allow_html=True)
+                            if st.button("✅ FINALIZAR", 
+                                      key=f"finalizar_{req['numero']}",
+                                      help="Concluir esta requisição (não será mais editável)"):
+                                req['status'] = 'FINALIZADA'
+                                req['data_hora_finalizacao'] = get_data_hora_brasil()
+                                if salvar_requisicao(req):
+                                    st.success(f"Requisição {req['numero']} finalizada com sucesso!")
                                     st.rerun()
+                            st.markdown("</div>", unsafe_allow_html=True)
 
-                        # Itens da requisição
-                        st.markdown('<div class="items-title">ITENS DA REQUISIÇÃO</div>', unsafe_allow_html=True)
-                        if req['items']:
-                            items_df = pd.DataFrame([{
-                                'Código': item.get('codigo', '-'),
-                                'Cód. Fabricante': item.get('cod_fabricante', '-'),
-                                'Descrição': item['descricao'],
-                                'Marca': item.get('marca', 'PC'),
-                                'QTD': item['quantidade'],
-                                'R$ Venda Unit': f"R$ {item.get('venda_unit', 0):.2f}",
-                                'R$ Total': f"R$ {(item.get('venda_unit', 0) * item['quantidade']):.2f}",
-                                'Prazo': item.get('prazo_entrega', '-')
-                            } for item in req['items']])
+                    # Exibir itens da requisição
+                    if req.get('items'):
+                        # Botões de aceitar ou recusar (somente para compradores/admins quando status for ABERTA)
+                        if req['status'] == 'ABERTA' and st.session_state['perfil'].lower() in ['comprador', 'administrador']:
+                            col1, col2 = st.columns([1, 1])
+                            with col1:
+                                if st.button("✅ ACEITAR", key=f"aceitar_{req['numero']}"):
+                                    req['status'] = 'EM ANDAMENTO'
+                                    req['comprador_responsavel'] = st.session_state['usuario']
+                                    req['data_hora_aceite'] = get_data_hora_brasil()
+                                    st.session_state[f'mostrar_responder_{req["numero"]}'] = True
+                                    if salvar_requisicao(req):
+                                        st.success(f"Requisição {req['numero']} aceita com sucesso!")
+                                        st.rerun()
+                            with col2:
+                                if st.button("❌ RECUSAR", key=f"recusar_{req['numero']}"):
+                                    st.session_state[f'mostrar_justificativa_{req["numero"]}'] = True
 
-                            st.dataframe(
-                                items_df,
-                                hide_index=True,
-                                use_container_width=True,
-                                column_config={
-                                    "Código": st.column_config.TextColumn("CÓDIGO", width=35),
-                                    "Cód. Fabricante": st.column_config.TextColumn("CÓD. FABRICANTE", width=100),
-                                    "Descrição": st.column_config.TextColumn("DESCRIÇÃO", width=350),
-                                    "Marca": st.column_config.TextColumn("MARCA", width=80),
-                                    "QTD": st.column_config.NumberColumn("QTD", width=30),
-                                    "R$ Venda Unit": st.column_config.TextColumn("R$ VENDA UNIT", width=70),
-                                    "R$ Total": st.column_config.TextColumn("R$ TOTAL", width=80),
-                                    "Prazo": st.column_config.TextColumn("PRAZO", width=100)
-                                }
-                            )
+                        # Exibir tabela de itens
+                        items_df = pd.DataFrame([{
+                            'ITEM': i + 1,
+                            'Código': item.get('codigo', '-'),
+                            'Cód. Fabricante': item.get('cod_fabricante', '-'),
+                            'Descrição': item.get('descricao', '-'),
+                            'Marca': item.get('marca', '-'),
+                            'QTD': item.get('quantidade', 0),
+                            'R$ Venda Unit': formatar_moeda(item.get('custo_unit', 0) * (1 + item.get('markup', 0) / 100)),
+                            'R$ Total': formatar_moeda(item.get('custo_unit', 0) * (1 + item.get('markup', 0) / 100) * item.get('quantidade', 0)),
+                            'Prazo': item.get('prazo_entrega', '-'),
+                        } for i, item in enumerate(req['items'])])
 
-                            # Exibição das observações do vendedor
-                            if req.get('observacoes_vendedor'):
-                                st.markdown("""
-                                    <div style='background-color: var(--background-color);
-                                              border-radius: 4px; 
-                                              padding: 10px; 
-                                              margin: 10px 0 0px 0; 
-                                              border-left: 4px solid #1B81C5;
-                                              border: 1px solid var(--secondary-background-color);'>
-                                        <p style='color: var(--text-color); 
-                                                  font-weight: bold; 
-                                                  margin-bottom: 10px;'>OBSERVAÇÕES DO VENDEDOR:</p>
-                                        <p style='margin: 0 0 5px 0; color: var(--text-color);'>{}</p>
-                                    </div>
-                                """.format(req['observacoes_vendedor']), unsafe_allow_html=True)
+                        st.dataframe(
+                            items_df,
+                            use_container_width=True,
+                            column_config={
+                                "ITEM": "ITEM",
+                                "Código": "CÓDIGO",
+                                "Cód. Fabricante": "CÓD. FABRICANTE",
+                                "Descrição": "DESCRIÇÃO",
+                                "Marca": "MARCA",
+                                "QTD": "QUANTIDADE",
+                                "R$ Venda Unit": "R$ VENDA UNIT",
+                                "R$ Total": "R$ TOTAL",
+                                "Prazo": "PRAZO",
+                                "Observações": "OBSERVAÇÕES"
+                            }
+                        )
 
-                            # Exibição da justificativa de recusa
-                            if req['status'] == 'RECUSADA':
-                                st.markdown("""
-                                    <div style='
-                                        background-color: rgba(198, 40, 40, 0.1);
-                                        padding: 15px;
-                                        border-radius: 8px;
-                                        margin: 10px 0;
-                                        border: 1px solid rgba(198, 40, 40, 0.3);
-                                        box-shadow: 0 2px 4px rgba(198, 40, 40, 0.1);'>
-                                        <p style='
-                                            color: rgb(198, 40, 40);
-                                            font-weight: bold;
-                                            margin-bottom: 5px;
-                                            font-size: 14px;'>
-                                            JUSTIFICATIVA DA RECUSA:
-                                        </p>
-                                        <p style='
-                                            margin: 0;
-                                            color: rgb(198, 40, 40);
-                                            opacity: 0.9;'>
-                                            {}
-                                        </p>
-                                    </div>
-                                """.format(req.get('justificativa_recusa', 'Não informada')), unsafe_allow_html=True)
+                        # Exibir observações do vendedor e comprador
+                        if req.get('observacoes_vendedor'):
+                            st.markdown(f"""
+                                <div style="margin-top: 0.5cm;"></div>
+                                <div class="observacao-box">
+                                    <strong>Observações do Vendedor:</strong><br>
+                                    {req['observacoes_vendedor']}
+                                </div>
+                            """, unsafe_allow_html=True)
+                        
+                        # Exibir observações do comprador se existirem
+                        observacoes_comprador = [f"<b>Item {i+1}:</b> {item.get('observacoes', '')}" 
+                                               for i, item in enumerate(req['items']) if item.get('observacoes')]
+                        if observacoes_comprador:
+                            st.markdown(f"""
+                                <div style="margin-top: 0.5cm;"></div>
+                                <div class="observacao-box" style="background-color: #f0f8ff;">
+                                    <strong>Observações do Comprador:</strong><br>
+                                    {"<br>".join(observacoes_comprador)}
+                                </div>
+                            """, unsafe_allow_html=True)
+                        
+                        st.markdown("""<div style="margin-bottom: 1cm;"></div>""", unsafe_allow_html=True)
 
-                            # Exibição da observação do comprador
-                            if req.get('observacao_geral'):
-                                st.markdown("""
-                                    <div style='background-color: var(--background-color);
-                                              border-radius: 4px; 
-                                              padding: 15px; 
-                                              margin: 20px 0 25px 0; 
-                                              border-left: 4px solid #2D2C74;
-                                              border: 1px solid var(--secondary-background-color);'>
-                                        <p style='color: var(--text-color); 
-                                                  font-weight: bold; 
-                                                  margin-bottom: 10px;'>OBSERVAÇÕES DO COMPRADOR:</p>
-                                        <p style='margin: 0 0 5px 0; color: var(--text-color);'>{}</p>
-                                    </div>
-                                """.format(req['observacao_geral']), unsafe_allow_html=True)
-
-                            if req['status'] == 'EM ANDAMENTO' and st.session_state['perfil'] in ['comprador', 'administrador']:
-                                st.markdown('<div class="input-container">', unsafe_allow_html=True)
-                                
-                                # Seleção do item para resposta
-                                item_selecionado = st.selectbox(
-                                    "SELECIONE O ITEM PARA RESPONDER",
-                                    options=[f"ITEM {item['item']}: {item['descricao']}" for item in req['items']],
-                                    key=f"select_item_{req['numero']}"
-                                )
-                                
-                                # Índice do item selecionado
-                                item_idx = int(item_selecionado.split(':')[0].replace('ITEM ', '')) - 1
-                                item = req['items'][item_idx]
-
-                                # Campos de resposta em linha única
+                    # Campos para responder itens (aparece ao aceitar ou em andamento)
+                    if req["status"] == "EM ANDAMENTO":
+                        for i, item in enumerate(req["items"]):
+                            with st.expander(f"ITEM {i + 1}: {item['descricao']}"):
                                 col1, col2, col3 = st.columns(3)
                                 with col1:
-                                    custo_str = st.text_input(
-                                        "R$ UNIT",
-                                        value=f"{item.get('custo_unit', 0.0):,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'),
-                                        key=f"custo_{req['numero']}_{item_idx}"
-                                    )
-                                    # Converte o valor digitado para float
+                                    custo_input = st.text_input("R$ UNIT", value=f"{item.get('custo_unit', 0):,.2f}".replace('.', ','), key=f"custo_unit_{req['numero']}_{i}")
                                     try:
-                                        custo_str = custo_str.replace('.', '').replace(',', '.')
-                                        item['custo_unit'] = float(custo_str)
+                                        item["custo_unit"] = float(custo_input.replace('.', '').replace(',', '.'))
                                     except ValueError:
-                                        item['custo_unit'] = 0.0
-                                        
+                                        pass
                                 with col2:
-                                    item['markup'] = st.number_input(
-                                        "% MARKUP",
-                                        value=item.get('markup', 0.0),
-                                        min_value=0.0,
-                                        format="%.0f",
-                                        step=1.0,
-                                        key=f"markup_{req['numero']}_{item_idx}"
-                                    )
+                                    markup_input = st.number_input("% MARKUP", value=int(item.get("markup", 0)), step=1, format="%d", key=f"markup_{req['numero']}_{i}")
+                                    item["markup"] = markup_input
                                 with col3:
-                                    item['prazo_entrega'] = st.text_input(
-                                        "PRAZO",
-                                        value=item.get('prazo_entrega', ''),
-                                        key=f"prazo_{req['numero']}_{item_idx}"
-                                    )
+                                    item["prazo_entrega"] = st.text_input("PRAZO", value=item.get("prazo_entrega", ""), key=f"prazo_{req['numero']}_{i}")
 
-                                # Cálculo automático quando custo e markup são preenchidos
-                                if item['custo_unit'] > 0 and item['markup'] > 0:
-                                    item['venda_unit'] = item['custo_unit'] * (1 + (item['markup'] / 100))
-                                    item['venda_total'] = item['venda_unit'] * item['quantidade']
-                                    item['salvo'] = True
+                                incluir_obs = st.checkbox("INCLUIR OBSERVAÇÕES", key=f"incluir_obs_{req['numero']}_{i}")
+                                if incluir_obs:
+                                    item["observacoes"] = st.text_area("Observações do Comprador", value=item.get("observacoes", ""), key=f"obs_{req['numero']}_{i}")
+
+                                if st.button(f"SALVAR ITEM {i + 1}", key=f"salvar_item_{req['numero']}_{i}"):
                                     salvar_requisicao(req)
+                                    st.success(f"Item {i + 1} salvo com sucesso!")
 
-                                # Checkbox e campo para observações
-                                mostrar_obs = st.checkbox(
-                                    "INCLUIR OBSERVAÇÕES",
-                                    key=f"show_obs_{req['numero']}"
-                                )
-                                observacao_geral = ""
-                                if mostrar_obs:
-                                    observacao_geral = st.text_area(
-                                        "OBSERVAÇÕES GERAIS",
-                                        value=req.get('observacao_geral', ''),
-                                        height=100,
-                                        key=f"obs_{req['numero']}"
-                                    )
-
-                                # Botões alinhados horizontalmente
-                                col_btn1, col_btn2 = st.columns(2)
-                                with col_btn1:
-                                    if st.button("💾 SALVAR ITEM", key=f"salvar_{req['numero']}_{item_idx}", type="primary"):
-                                        if mostrar_obs:
-                                            req['observacao_geral'] = observacao_geral
-                                        salvar_requisicao(req)
-                                        st.success(f"ITEM {item['item']} SALVO COM SUCESSO!")
+                    # Campo de justificativa para recusa
+                    if st.session_state.get(f'mostrar_justificativa_{req["numero"]}', False):
+                        justificativa = st.text_area(
+                            "Digite o motivo da recusa",
+                            key=f"justificativa_recusa_{req['numero']}"
+                        )
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button(f"CONFIRMAR RECUSA {req['numero']}", key=f"confirmar_recusa_{req['numero']}"):
+                                if not justificativa.strip():
+                                    st.error("Por favor, informe o motivo da recusa.")
+                                else:
+                                    req['status'] = 'RECUSADA'
+                                    req['justificativa_recusa'] = justificativa
+                                    req['comprador_responsavel'] = st.session_state['usuario']
+                                    req['data_hora_resposta'] = get_data_hora_brasil()
+                                    if salvar_requisicao(req):
+                                        st.success(f"Requisição {req['numero']} recusada com sucesso!")
                                         st.rerun()
-                                
-                                with col_btn2:
-                                    todos_itens_salvos = all(item.get('salvo', False) for item in req['items'])
-                                    if todos_itens_salvos:
-                                        if st.button("✅ FINALIZAR", key=f"finalizar_{req['numero']}", type="primary"):
-                                            req['status'] = 'FINALIZADA'
-                                            req['data_hora_resposta'] = get_data_hora_brasil()
-                                            if salvar_requisicao(req):
-                                                enviar_email_requisicao(req, "finalizada")
-                                                st.success("REQUISIÇÃO FINALIZADA COM SUCESSO!")
-                                                st.rerun()
-                                            else:
-                                                st.error("ERRO AO SALVAR A REQUISIÇÃO. TENTE NOVAMENTE.")
+
+        # Controles de paginação
+        if len(requisicoes_visiveis) > 0:
+            with st.container():
+                st.markdown('<div class="paginacao-container">', unsafe_allow_html=True)
+                
+                col1, col2, col3, col4, col5 = st.columns([1,1,2,1,1])
+                
+                with col1:
+                    novo_valor = st.selectbox(
+                        "Itens por página:",
+                        [10, 25, 50],
+                        index=[10, 25, 50].index(st.session_state.itens_por_pagina),
+                        key="itens_por_pagina_select"
+                    )
+                    if novo_valor != st.session_state.itens_por_pagina:
+                        st.session_state.itens_por_pagina = novo_valor
+                        st.session_state.pagina_atual = 1
+                        st.rerun()
+                
+                with col2:
+                    if st.session_state.pagina_atual > 1:
+                        if st.button("⏮️ Anterior", key="anterior"):
+                            st.session_state.pagina_atual -= 1
+                            st.rerun()
+                
+                with col3:
+                    st.markdown(f"**📄 Página {st.session_state.pagina_atual} de {total_paginas}**", unsafe_allow_html=True)
+                
+                with col4:
+                    if st.session_state.pagina_atual < total_paginas:
+                        if st.button("Próximo ⏭️", key="proximo"):
+                            st.session_state.pagina_atual += 1
+                            st.rerun()
+                
+                with col5:
+                    st.markdown(f"**📊 Total: {len(requisicoes_visiveis)} requisições**", unsafe_allow_html=True)
+                
+                st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            st.warning("NENHUMA REQUISIÇÃO ENCONTRADA COM OS FILTROS SELECIONADOS.")
 
 def get_permissoes_perfil(perfil):
-    permissoes_padrao = {
+    """Retorna as permissões padrão para cada perfil"""
+    perfis_padrao = {
         'vendedor': {
             'dashboard': True,
             'requisicoes': True,
@@ -2223,12 +2158,12 @@ def get_permissoes_perfil(perfil):
             'editar_perfis': True
         }
     }
-    return permissoes_padrao.get(perfil, permissoes_padrao['vendedor'])
+    return perfis_padrao.get(perfil.lower(), {})
 
 def configuracoes():
     st.title("Configurações")
     
-    if st.session_state['perfil'] in ['administrador', 'comprador']:
+    if st.session_state['perfil'].lower() in ['administrador', 'comprador']:
         col1, col2, col3 = st.columns(3)
         with col1:
             if st.button("👥 Usuários", type="primary", use_container_width=True):
@@ -2245,7 +2180,7 @@ def configuracoes():
     else:
         st.session_state['config_modo'] = 'sistema'
 
-    if st.session_state.get('config_modo') == 'usuarios' and st.session_state['perfil'] == 'administrador':
+    if st.session_state.get('config_modo') == 'usuarios' and st.session_state['perfil'].lower() == 'administrador':
         st.markdown("""
             <style>
             .stButton > button {
@@ -2396,8 +2331,7 @@ def configuracoes():
             }
         )
 
-    # Seção de Perfis
-    elif st.session_state.get('config_modo') == 'perfis':
+    elif st.session_state.get('config_modo') == 'perfis' and st.session_state['perfil'].lower() == 'administrador':
         st.markdown("### Gerenciamento de Perfis")
         
         perfil_selecionado = st.selectbox("Selecione o perfil para editar", ['vendedor', 'comprador', 'administrador'])
@@ -2454,219 +2388,257 @@ def configuracoes():
                     st.rerun()
                 except Exception as e:
                     st.error(f"Erro ao salvar permissões: {str(e)}")
-            
-    # Seção de Sistema
-    if st.session_state.get('config_modo') == 'sistema':
+
+    elif st.session_state.get('config_modo') == 'sistema':
         st.markdown("### Configurações do Sistema")
         
-        if st.session_state['perfil'] == 'administrador':
-            tab1, tab2 = st.tabs(["📊 Monitoramento", "⚙️ Personalizar"])
+        if st.session_state['perfil'].lower() == 'administrador':
+            tab1, tab2, tab3 = st.tabs(["📊 Monitoramento", "⚙️ Backup", "🔍 Firebase"])
             
+            # Monitoramento do Sistema
             with tab1:
                 st.markdown("#### Monitoramento do Sistema")
                 
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    st.markdown("##### Banco de Dados")
+                    st.markdown("##### Estatísticas do Firebase")
                     try:
-                        conn = sqlite3.connect('database/requisicoes.db')
-                        cursor = conn.cursor()
-                        cursor.execute("SELECT COUNT(*) FROM requisicoes")
-                        total_requisicoes = cursor.fetchone()[0]
+                        ref_requisicoes = db.reference('requisicoes')
+                        requisicoes = ref_requisicoes.get()
+                        total_requisicoes = len(requisicoes) if requisicoes else 0
                         
-                        db_size = os.path.getsize('database/requisicoes.db') / (1024 * 1024)
+                        ref_usuarios = db.reference('usuarios')
+                        usuarios = ref_usuarios.get()
+                        total_usuarios = len(usuarios) if usuarios else 0
                         
                         st.metric("Total de Requisições", total_requisicoes)
-                        st.metric("Tamanho do Banco", f"{db_size:.2f} MB")
-                        conn.close()
+                        st.metric("Total de Usuários", total_usuarios)
+                        
                     except Exception as e:
-                        st.error("Erro ao acessar banco de dados")
+                        st.error(f"Erro ao acessar Firebase: {str(e)}")
                 
                 with col2:
-                    st.markdown("##### Importação de Backup")
-                    uploaded_file = st.file_uploader(
-                        "Selecione o arquivo de backup",
-                        type=['json', 'txt', 'py'],
-                        help="Arquivos suportados: JSON, TXT, PY"
-                    )
-                    
-                    if uploaded_file is not None:
-                        if st.button("📥 Restaurar Backup", type="primary"):
-                            try:
-                                # Backup preventivo
-                                if os.path.exists('database/requisicoes.db'):
-                                    shutil.copy2('database/requisicoes.db', 'backups/pre_restore.db')
-                                
-                                # Processar arquivo baseado na extensão
-                                if uploaded_file.name.endswith('.json'):
-                                    dados = json.loads(uploaded_file.getvalue().decode('utf-8'))
-                                elif uploaded_file.name.endswith('.txt'):
-                                    dados = pd.read_csv(uploaded_file, sep='\t').to_dict('records')
-                                elif uploaded_file.name.endswith('.py'):
-                                    conteudo = uploaded_file.getvalue().decode('utf-8')
-                                    dados_str = conteudo.replace('dados = ', '')
-                                    dados = eval(dados_str)
-                                
-                                # Conectar e inserir dados
-                                conn = sqlite3.connect('database/requisicoes.db')
-                                cursor = conn.cursor()
-                                
-                                for req in dados:
-                                    cursor.execute('''
-                                        INSERT OR REPLACE INTO requisicoes 
-                                        (numero, cliente, vendedor, data_hora, status, items, 
-                                        observacoes_vendedor, comprador_responsavel, data_hora_resposta,
-                                        justificativa_recusa, observacao_geral)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    ''', (
-                                        str(req['numero']),
-                                        req['cliente'],
-                                        req['vendedor'],
-                                        req['data_hora'],
-                                        req['status'],
-                                        req['items'] if isinstance(req['items'], str) else json.dumps(req['items']),
-                                        req.get('observacoes_vendedor', ''),
-                                        req.get('comprador_responsavel', ''),
-                                        req.get('data_hora_resposta', ''),
-                                        req.get('justificativa_recusa', ''),
-                                        req.get('observacao_geral', '')
-                                    ))
-                                
-                                conn.commit()
-                                conn.close()
-                                st.success(f"Backup restaurado com sucesso! {len(dados)} requisições importadas.")
-                                st.rerun()
-                                
-                            except Exception as e:
-                                st.error(f"Erro na restauração: {str(e)}")
-                                if os.path.exists('backups/pre_restore.db'):
-                                    shutil.copy2('backups/pre_restore.db', 'database/requisicoes.db')
-                
-                st.markdown("#### Visualização de Dados")
-                if st.button("🔍 Visualizar Dados do Banco", type="primary"):
-                    try:
-                        conn = sqlite3.connect('database/requisicoes.db')
-                        df = pd.read_sql_query("SELECT * FROM requisicoes", conn)
-                        st.dataframe(df)
-                        conn.close()
-                    except Exception as e:
-                        st.error("Erro ao visualizar dados")
-                
-                if st.button("💾 Backup Manual", type="primary"):
-                    try:
-                        backup_dir = "backups"
-                        if not os.path.exists(backup_dir):
-                            os.makedirs(backup_dir)
-                        
-                        # Usar timezone de São Paulo para o timestamp
-                        sp_tz = pytz.timezone('America/Sao_Paulo')
-                        timestamp = datetime.now(sp_tz).strftime("%Y%m%d_%H%M%S")
-                        
-                        conn = sqlite3.connect('database/requisicoes.db')
-                        df = pd.read_sql_query("SELECT * FROM requisicoes", conn)
-                        
-                        # Salvar como JSON
-                        backup_filename = f'backup_manual_{timestamp}.json'
-                        with open(f'{backup_dir}/{backup_filename}', 'w', encoding='utf-8') as f:
-                            json.dump(df.to_dict('records'), f, ensure_ascii=False, indent=2)
-                        
-                        conn.close()
-                        st.success("Backup realizado com sucesso!")
-                    except Exception as e:
-                        st.error(f"Erro ao criar backup: {str(e)}")
-                
-                # Lista de Backups
-                st.markdown("#### Backups Disponíveis")
-                backup_dir = "backups"
-                if os.path.exists(backup_dir):
-                    backup_files = [f for f in os.listdir(backup_dir) if f.endswith(('.zip', '.json', '.txt', '.py'))]
-                    
-                    if backup_files:
-                        # Organiza os backups por data de criação (mais recente primeiro)
-                        backup_info = []
-                        for backup_file in backup_files:
-                            file_path = os.path.join(backup_dir, backup_file)
-                            file_size = os.path.getsize(file_path)
-                            creation_time = os.path.getctime(file_path)
-                            
-                            # Converter para timezone de São Paulo
-                            sp_tz = pytz.timezone('America/Sao_Paulo')
-                            creation_datetime = datetime.fromtimestamp(creation_time)
-                            creation_datetime = pytz.utc.localize(creation_datetime).astimezone(sp_tz)
-                            
-                            backup_info.append({
-                                'arquivo': backup_file,
-                                'caminho': file_path,
-                                'tamanho': file_size,
-                                'data_criacao': creation_datetime
-                            })
-                        
-                        # Ordena por data de criação (mais recente primeiro)
-                        backup_info.sort(key=lambda x: x['data_criacao'], reverse=True)
-                        
-                        for backup in backup_info:
-                            col1, col2, col3, col4, col5 = st.columns([3, 2, 2, 1, 1])
-                            
-                            with col1:
-                                st.text(backup['arquivo'])
-                            
-                            with col2:
-                                # Formata a data e hora no timezone de São Paulo
-                                st.text(backup['data_criacao'].strftime('%d/%m/%Y %H:%M:%S'))
-                            
-                            with col3:
-                                # Identifica se é backup automático ou manual
-                                tipo = 'AUTOMÁTICO' if 'auto' in backup['arquivo'].lower() else 'MANUAL'
-                                st.text(tipo)
-                            
-                            with col4:
-                                # Formata o tamanho do arquivo
-                                if backup['tamanho'] < 1024:
-                                    tamanho_fmt = f"{backup['tamanho']} B"
-                                elif backup['tamanho'] < 1024**2:
-                                    tamanho_fmt = f"{backup['tamanho']/1024:.1f} KB"
-                                else:
-                                    tamanho_fmt = f"{backup['tamanho']/1024**2:.1f} MB"
-                                st.text(tamanho_fmt)
-                            
-                            with col5:
-                                col5_1, col5_2 = st.columns(2)
-                                with col5_1:
-                                    with open(backup['caminho'], "rb") as f:
-                                        bytes_data = f.read()
-                                        st.download_button(
-                                            label="⬇️",
-                                            data=bytes_data,
-                                            file_name=backup['arquivo'],
-                                            mime="application/octet-stream",
-                                            key=f"download_{backup['arquivo']}"
-                                        )
-                                with col5_2:
-                                    if st.button("🗑️", key=f"delete_{backup['arquivo']}"):
-                                        try:
-                                            os.remove(backup['caminho'])
-                                            st.success("Backup removido com sucesso!")
-                                            st.rerun()
-                                        except Exception as e:
-                                            st.error(f"Erro ao remover backup: {str(e)}")
+                    st.markdown("##### Status da Conexão")
+                    if verificar_conexao():
+                        st.success("✅ Conectado ao Firebase")
+                        st.metric("Status", "Online")
                     else:
-                        st.info("Nenhum arquivo de backup encontrado.")
-                else:
-                    st.warning("Diretório de backup não encontrado.")
+                        st.error("❌ Problema na conexão com o Firebase")
+                        st.metric("Status", "Offline")
+
+                # Gráfico de espaço disponível/consumido
+                st.markdown("#### Armazenamento do Firebase")
+                try:
+                    fig = mostrar_espaco_armazenamento()
+                    st.plotly_chart(fig, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Erro ao gerar gráfico: {str(e)}")
+
+            # Gerenciamento de Backup
+            with tab2:
+                st.markdown("#### Gerenciamento de Backup")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if st.button("🔄 Criar Backup Agora", type="primary", use_container_width=True):
+                        try:
+                            with st.spinner("Criando backup..."):
+                                backup_file = backup_requisicoes()
+                                if backup_file and verificar_conteudo_backup(backup_file):
+                                    st.success(f"Backup criado com sucesso: {os.path.basename(backup_file)}")
+                                else:
+                                    st.error("Falha ao criar ou verificar o backup.")
+                        except Exception as e:
+                            st.error(f"Erro ao criar backup: {str(e)}")
+                
+                with col2:
+                    uploaded_file = st.file_uploader(
+                        "Selecione um arquivo de backup para restaurar",
+                        type=['json'],
+                        help="Somente arquivos JSON são suportados."
+                    )
+                    if uploaded_file and st.button("📥 Restaurar Backup", type="primary"):
+                        try:
+                            with st.spinner("Restaurando backup..."):
+                                if restaurar_backup(uploaded_file):
+                                    st.success("Backup restaurado com sucesso!")
+                                    st.rerun()
+                        except Exception as e:
+                            st.error(f"Erro ao restaurar backup: {str(e)}")
+                
+                st.markdown("#### Backups Disponíveis")
+                listar_backups()
+
+            # Visualização geral do Firebase
+            with tab3:
+                st.markdown("#### Visualização Geral do Firebase")
+                
+                try:
+                    ref_requisicoes = db.reference('requisicoes')
+                    requisicoes = ref_requisicoes.get()
+                    
+                    ref_usuarios = db.reference('usuarios')
+                    usuarios = ref_usuarios.get()
+                    
+                    # Exibição em formato JSON
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.subheader("Requisições (JSON)")
+                        if requisicoes:
+                            requisicoes_str = json.dumps(requisicoes, ensure_ascii=False, indent=4)
+                            st.text_area("", value=requisicoes_str, height=300)
+                    
+                    with col2:
+                        st.subheader("Usuários (JSON)")
+                        if usuarios:
+                            usuarios_str = json.dumps(usuarios, ensure_ascii=False, indent=4)
+                            st.text_area("", value=usuarios_str, height=300)
+                    
+                except Exception as e:
+                    st.error(f"Erro ao carregar dados: {str(e)}")
+
+def gerenciamento_perfis():
+    st.title("⚙️ Controle de Acesso por Perfil")
+    
+    # Carregar perfis do Firebase ou criar padrões
+    ref_perfis = db.reference('perfis')
+    perfis = ref_perfis.get() or {
+        'vendedor': {
+            'dashboard': True,
+            'requisicoes': True,
+            'cotacoes': True,
+            'importacao': False,
+            'configuracoes': False
+        },
+        'comprador': {
+            'dashboard': True,
+            'requisicoes': True,
+            'cotacoes': True,
+            'importacao': True,
+            'configuracoes': False
+        },
+        'administrador': {
+            'dashboard': True,
+            'requisicoes': True,
+            'cotacoes': True,
+            'importacao': True,
+            'configuracoes': True
+        }
+    }
+    
+    # Seletor de perfil
+    perfil = st.selectbox(
+        "SELECIONE O PERFIL:",
+        options=list(perfis.keys()),
+        format_func=lambda x: x.upper()
+    )
+    
+    st.markdown("### 🔘 Habilitar/Desabilitar Telas")
+    st.caption("As alterações são aplicadas instantaneamente")
+
+    # Contêiner principal
+    with st.container():
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### 📊 Telas Principais")
+            for tela, label in [
+                ('dashboard', 'Dashboard'),
+                ('requisicoes', 'Requisições'),
+                ('cotacoes', 'Cotações')
+            ]:
+                novo_valor = st.toggle(
+                    label,
+                    value=perfis[perfil].get(tela, False),
+                    key=f"{perfil}_{tela}_toggle"
+                )
+                if novo_valor != perfis[perfil].get(tela, False):
+                    perfis[perfil][tela] = novo_valor
+                    ref_perfis.child(perfil).update({tela: novo_valor})
+                    st.session_state.perfis = perfis
+                    st.rerun()
+        
+        with col2:
+            st.markdown("#### 🛠️ Telas Avançadas")
+            for tela, label in [
+                ('importacao', 'Importação'),
+                ('configuracoes', 'Configurações')
+            ]:
+                novo_valor = st.toggle(
+                    label,
+                    value=perfis[perfil].get(tela, False),
+                    key=f"{perfil}_{tela}_toggle"
+                )
+                if novo_valor != perfis[perfil].get(tela, False):
+                    perfis[perfil][tela] = novo_valor
+                    ref_perfis.child(perfil).update({tela: novo_valor})
+                    st.session_state.perfis = perfis
+                    st.rerun()
+
+    # Visualização rápida
+    st.divider()
+    st.markdown(f"**PERFIL SELECIONADO:** `{perfil.upper()}`")
+    st.markdown("**PERMISSÕES ATIVAS:**")
+    
+    permissoes_ativas = [tela for tela, ativa in perfis[perfil].items() if ativa]
+    if permissoes_ativas:
+        st.write(", ".join(permissoes_ativas))
+    else:
+        st.warning("Nenhuma permissão ativa para este perfil")
+
+    # Botão de restauração
+    if st.button("🔄 Restaurar Padrões", type="secondary"):
+        perfis_padrao = {
+            'vendedor': {
+                'dashboard': True,
+                'requisicoes': True,
+                'cotacoes': True,
+                'importacao': False,
+                'configuracoes': False
+            },
+            'comprador': {
+                'dashboard': True,
+                'requisicoes': True,
+                'cotacoes': True,
+                'importacao': True,
+                'configuracoes': False
+            },
+            'administrador': {
+                'dashboard': True,
+                'requisicoes': True,
+                'cotacoes': True,
+                'importacao': True,
+                'configuracoes': True
+            }
+        }
+        ref_perfis.set(perfis_padrao)
+        st.session_state.perfis = perfis_padrao
+        st.success("Padrões restaurados com sucesso!")
+        st.rerun()
                     
 def main():
-    # Inicializar o banco de dados
-    inicializar_banco()
-    
-    # Adiciona atualização automática a cada 120 segundos
-    st_autorefresh(interval=3600000, key="backup_refresh")
-    
+    # Inicializar Firebase antes de qualquer operação
+    if not inicializar_firebase():
+        st.error("FALHA CRÍTICA: Não foi possível conectar ao banco de dados")
+        st.stop()
+
+    # Inicializar sistema e bancos de dados
+    if not inicializar_sistema():
+        st.error("Falha na inicialização do sistema")
+        st.stop()
+
+    # Atualização automática (opcional)
+    st_autorefresh(interval=3600000, key="backup_refresh")  # 1 hora
+
+    # Verificação de autenticação
     if 'usuario' not in st.session_state:
         tela_login()
     else:
-        # Adicione aqui a mensagem fixa
-        col1, col2 = st.columns([3,1])
+        # Header com última atualização
+        col1, col2 = st.columns([3, 1])
         with col2:
             st.markdown(f"""
                 <div style='
@@ -2679,9 +2651,11 @@ def main():
                     🔄 Última atualização: {get_data_hora_brasil()}
                 </div>
             """, unsafe_allow_html=True)
-        
+
+        # Carregar menu lateral
         menu = menu_lateral()
-        
+
+        # Navegação entre telas
         if menu == "Dashboard":
             dashboard()
         elif menu == "Requisições":
@@ -2694,6 +2668,13 @@ def main():
             st.info("Funcionalidade em desenvolvimento")
         elif menu == "Configurações":
             configuracoes()
+        else:
+            st.error("Opção de menu inválida")
+
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        st.error(f"Erro inesperado: {str(e)}")
+        logging.error(f"Erro inesperado: {str(e)}", exc_info=True)
