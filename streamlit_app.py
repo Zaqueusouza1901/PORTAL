@@ -23,24 +23,17 @@ import glob
 from streamlit_autorefresh import st_autorefresh
 
 def inicializar_firebase():
-    max_tentativas = 3
-    tentativa = 0
-    while tentativa < max_tentativas:
-        try:
-            if not firebase_admin._apps:
-                # Converte AttrDict para JSON string
-                credenciais_json = st.secrets["FIREBASE_CREDENTIALS"].to_dict()
-                cred = credentials.Certificate(credenciais_json)
-                initialize_app(cred, {
-                    'databaseURL': 'https://portal-26466-default-rtdb.firebaseio.com'
-                })
-            return True
-        except Exception as e:
-            tentativa += 1
-            st.error(f"Erro ao inicializar Firebase: {str(e)}")
-            time.sleep(2 ** tentativa)  # Backoff exponencial
-    st.error(f"Falha crítica na conexão após {max_tentativas} tentativas")
-    return False
+    try:
+        if not firebase_admin._apps:
+            cred = credentials.Certificate(st.secrets["FIREBASE_CREDENTIALS"])
+            firebase_admin.initialize_app(cred, {
+                'databaseURL': 'https://portal-26466-default-rtdb.firebaseio.com'
+            })
+        st.success("Firebase inicializado com sucesso!")
+        return True
+    except Exception as e:
+        st.error(f"Erro ao inicializar Firebase: {str(e)}")
+        return False
 
 # Chamada IMEDIATA após a definição da função
 if not inicializar_firebase():
