@@ -28,6 +28,7 @@ def inicializar_firebase():
     while tentativa < max_tentativas:
         try:
             if not firebase_admin._apps:
+                # Carregar credenciais do secrets.toml
                 cred = credentials.Certificate(st.secrets["FIREBASE_CREDENTIALS"])
                 initialize_app(cred, {
                     'databaseURL': 'https://portal-26466-default-rtdb.firebaseio.com'
