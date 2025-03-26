@@ -24,10 +24,17 @@ from streamlit_autorefresh import st_autorefresh
 
 def inicializar_firebase():
     if not firebase_admin._apps:
-        cred = credentials.Certificate(st.secrets["FIREBASE_CREDENTIALS"])
-        initialize_app(cred, {
-            'databaseURL': 'https://portal-26466-default-rtdb.firebaseio.com'
-        })
+        try:
+            # Carregar credenciais do secrets
+            firebase_credentials = json.loads(st.secrets["FIREBASE_CREDENTIALS"])
+            cred = credentials.Certificate(firebase_credentials)
+            initialize_app(cred, {
+                'databaseURL': 'https://portal-26466-default-rtdb.firebaseio.com'
+            })
+            st.success("Firebase inicializado com sucesso!")
+        except Exception as e:
+            st.error(f"Erro ao inicializar Firebase: {str(e)}")
+            return False
     return True
 
 if not inicializar_firebase():
