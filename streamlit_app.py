@@ -1,7 +1,6 @@
 import streamlit as st
 import sqlite3
 import hashlib
-import firebase_admin
 import pandas as pd
 import time
 import zipfile
