@@ -6,3 +6,4 @@ email-validator==2.1.0.post1
 matplotlib==3.7.2
 numpy==1.24.3
 firebase-admin==6.0.0
+streamlit-autorefresh==1.0.1
