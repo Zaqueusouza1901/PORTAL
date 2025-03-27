@@ -330,7 +330,7 @@ def enviar_email_requisicao(requisicao, tipo_notificacao):
             html += f"""
                 <div style="margin-top: 20px; padding: 15px; background-color: #e9f7fe; border-left: 4px solid #2D2C74;">
                     <h3 style="margin-top: 0; color: #2D2C74;">Observações do Vendedor:</h3>
-                    <p style="margin-bottom: 0;">{requisicao['observacoes_vendedor']}</p>
+                    <p style="margin-bottom: 0; white-space: pre-wrap;">{requisicao['observacoes_vendedor']}</p>
                 </div>
             """
 
@@ -339,7 +339,7 @@ def enviar_email_requisicao(requisicao, tipo_notificacao):
             html += f"""
                 <div style="margin-top: 20px; padding: 15px; background-color: #e8f5e9; border-left: 4px solid #4CAF50;">
                     <h3 style="margin-top: 0; color: #4CAF50;">Observações do Comprador:</h3>
-                    <p style="margin-bottom: 0;">{requisicao['observacao_geral']}</p>
+                    <p style="margin-bottom: 0; white-space: pre-wrap;">{requisicao['observacao_geral']}</p>
                 </div>
             """
 
@@ -348,7 +348,7 @@ def enviar_email_requisicao(requisicao, tipo_notificacao):
             html += f"""
                 <div style="margin-top: 20px; padding: 15px; background-color: #ffebee; border-left: 4px solid #f44336;">
                     <h3 style="margin-top: 0; color: #f44336;">Justificativa da Recusa:</h3>
-                    <p style="margin-bottom: 0;">{requisicao['justificativa_recusa']}</p>
+                    <p style="margin-bottom: 0; white-space: pre-wrap;">{requisicao['justificativa_recusa']}</p>
                 </div>
             """
 
