@@ -316,21 +316,26 @@ def enviar_email_requisicao(requisicao, tipo_notificacao):
                 </table>
         """
         
-        # Adiciona observações do vendedor se existirem
+            # Adicionar observação do comprador para o item, se existir
+            if item.get('observacao_comprador'):
+                html += f"""
+                    <tr style="background-color: #e8f5e9;">
+                        <td colspan="8" style="padding: 10px;">
+                            <strong>Observação do Comprador (Item {item.get('item')}):</strong> {item['observacao_comprador']}
+                        </td>
+                    </tr>
+                """
+
+        html += """
+                </table>
+        """
+        
+        # Adiciona observações gerais do vendedor se existirem
         if requisicao.get('observacoes_vendedor'):
             html += f"""
                 <div style="margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-left: 4px solid #4CAF50;">
                     <h3 style="margin-top: 0; color: #4CAF50;">Observações do Vendedor:</h3>
                     <p style="margin-bottom: 0;">{requisicao['observacoes_vendedor']}</p>
-                </div>
-            """
-
-        # Adiciona observações do comprador se existirem
-        if requisicao.get('observacao_geral'):
-            html += f"""
-                <div style="margin-top: 20px; padding: 15px; background-color: #e8f5e9; border-left: 4px solid #2D2C74;">
-                    <h3 style="margin-top: 0; color: #2D2C74;">Observações do Comprador:</h3>
-                    <p style="margin-bottom: 0;">{requisicao['observacao_geral']}</p>
                 </div>
             """
 
