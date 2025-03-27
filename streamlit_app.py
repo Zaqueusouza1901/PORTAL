@@ -266,57 +266,101 @@ def enviar_email_requisicao(requisicao, tipo_notificacao):
         data_criacao = requisicao['data_hora'].split(' - ')
         data_resposta = requisicao.get('data_hora_resposta', '').split(' - ') if requisicao.get('data_hora_resposta') else ['', '']
         
-        # Cria o corpo do email no formato simples como na imagem
-        email_body = f"""
-SUA REQUISIÇÃO Nº{requisicao['numero']} FOI {tipo_notificacao.upper()}
+        # Cria o corpo do email em HTML
+        html = f"""
+        <html>
+            <body style="font-family: Arial, sans-serif;">
+                <div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px;">
+                    <h2 style="color: #2D2C74;">SUA REQUISIÇÃO Nº{requisicao['numero']} FOI {tipo_notificacao.upper()}</h2>
+                    <p><strong>Jetfrio Alerta</strong></p>
+                    <p>Para: {requisicao['vendedor']}</p>
+                    <p>Cc: {requisicao.get('comprador_responsavel', '')}</p>
+                </div>
+                
+                <div style="margin-top: 20px;">
+                    <p><strong>Requisição #{requisicao['numero']}</strong></p>
+                    <p><strong>Cliente:</strong> {requisicao['cliente']}</p>
+                    <p><strong>Status:</strong> {requisicao['status']}</p>
+                </div>
+                
+                <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 10px 0;">
+                    <p><strong>Criado por:</strong> {requisicao['vendedor']}</p>
+                    <p><strong>Data/Hora Criação:</strong> {data_criacao[1]} {data_criacao[0]}</p>
+                    <p><strong>Respondido por:</strong> {requisicao.get('comprador_responsavel', '-')}</p>
+                    <p><strong>Data/Hora Resposta:</strong> {data_resposta[1]} {data_resposta[0] if data_resposta[0] else '-'}</p>
+                </div>
 
-Jetfrio Alerta
-Para: {requisicao['vendedor']}
-{'Cc: ' + requisicao.get('comprador_responsavel', '') if requisicao.get('comprador_responsavel') else ''}
-
-Requisição #{requisicao['numero']}
-
-**Cliente:** {requisicao['cliente']}
-
-**Status:** {requisicao['status']}
-
-**Criado por:** {requisicao['vendedor']}
-
-**Data/Hora Criação:** {data_criacao[1]} {data_criacao[0]}
-
-**Respondido por:** {requisicao.get('comprador_responsavel', '-')}
-
-**Data/Hora Resposta:** {data_resposta[1]} {data_resposta[0] if data_resposta[0] else '-'}
-
-"""
-
-        # Adiciona a tabela de itens
-        email_body += "| Item | Código    | Descrição    | Marca   | Qtd | Valor Unit. | Total    | Prazo    |\n"
-        email_body += "|---|---|---|---|---|---|---|---|\n"
+                <table border="1" style="border-collapse: collapse; width: 100%; margin-top: 15px;">
+                    <tr style="background-color: #2D2C74; color: white;">
+                        <th style="padding: 8px; text-align: center;">Item</th>
+                        <th style="padding: 8px; text-align: center;">Código</th>
+                        <th style="padding: 8px; text-align: center;">Descrição</th>
+                        <th style="padding: 8px; text-align: center;">Marca</th>
+                        <th style="padding: 8px; text-align: center;">Qtd</th>
+                        <th style="padding: 8px; text-align: center;">Valor Unit.</th>
+                        <th style="padding: 8px; text-align: center;">Total</th>
+                        <th style="padding: 8px; text-align: center;">Prazo</th>
+                    </tr>
+        """
         
         for item in requisicao['items']:
+            # Formata os valores monetários
             venda_unit = item.get('venda_unit', 0)
             total = venda_unit * item['quantidade']
             
-            # Formata valores monetários com separador de milhar e 2 casas decimais
-            venda_unit_fmt = f"R$ {venda_unit:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            total_fmt = f"R$ {total:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            
-            email_body += f"| {item['item']} | {item['codigo']} | {item['descricao']} | {item['marca']} | {item['quantidade']} | {venda_unit_fmt} | {total_fmt} | {item.get('prazo_entrega', '-')} |\n"
+            html += f"""
+                <tr>
+                    <td style="padding: 8px; text-align: center;">{item['item']}</td>
+                    <td style="padding: 8px; text-align: center;">{item['codigo']}</td>
+                    <td style="padding: 8px; text-align: left;">{item['descricao']}</td>
+                    <td style="padding: 8px; text-align: center;">{item['marca']}</td>
+                    <td style="padding: 8px; text-align: center;">{item['quantidade']}</td>
+                    <td style="padding: 8px; text-align: right;">R$ {venda_unit:,.2f}</td>
+                    <td style="padding: 8px; text-align: right;">R$ {total:,.2f}</td>
+                    <td style="padding: 8px; text-align: center;">{item.get('prazo_entrega', '-')}</td>
+                </tr>
+            """
+        
+        html += """
+                </table>
+        """
 
         # Adiciona observações do vendedor se existirem
         if requisicao.get('observacoes_vendedor'):
-            email_body += f"\nObservações do Vendedor:\n\n{requisicao['observacoes_vendedor']}\n"
+            html += f"""
+                <div style="margin-top: 20px; padding: 15px; background-color: #e9f7fe; border-left: 4px solid #2D2C74;">
+                    <h3 style="margin-top: 0; color: #2D2C74;">Observações do Vendedor:</h3>
+                    <p style="margin-bottom: 0; white-space: pre-wrap;">{requisicao['observacoes_vendedor']}</p>
+                </div>
+            """
 
         # Adiciona observações do comprador se existirem
-        if requisicao.get('observacao_geral'):
-            email_body += f"\nObservações do Comprador:\n\n{requisicao['observacao_geral']}\n"
+        if requisicao.get('obsercacoes_comprador'):
+            html += f"""
+                <div style="margin-top: 20px; padding: 15px; background-color: #e8f5e9; border-left: 4px solid #4CAF50;">
+                    <h3 style="margin-top: 0; color: #4CAF50;">Observações do Comprador:</h3>
+                    <p style="margin-bottom: 0; white-space: pre-wrap;">{requisicao['observacao_geral']}</p>
+                </div>
+            """
 
         # Adiciona justificativa de recusa se existir
         if tipo_notificacao.upper() == 'RECUSADA' and requisicao.get('justificativa_recusa'):
-            email_body += f"\nJustificativa da Recusa:\n\n{requisicao['justificativa_recusa']}\n"
+            html += f"""
+                <div style="margin-top: 20px; padding: 15px; background-color: #ffebee; border-left: 4px solid #f44336;">
+                    <h3 style="margin-top: 0; color: #f44336;">Justificativa da Recusa:</h3>
+                    <p style="margin-bottom: 0; white-space: pre-wrap;">{requisicao['justificativa_recusa']}</p>
+                </div>
+            """
 
-        msg.attach(MIMEText(email_body, 'plain'))
+        html += """
+                <div style="margin-top: 20px; font-size: 12px; color: #777;">
+                    <p>Este é um email automático, por favor não responda.</p>
+                </div>
+            </body>
+        </html>
+        """
+        
+        msg.attach(MIMEText(html, 'html'))
         
         # Envia o email
         with smtplib.SMTP(EMAIL_CONFIG['SMTP_SERVER'], EMAIL_CONFIG['SMTP_PORT']) as server:
