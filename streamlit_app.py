@@ -311,25 +311,20 @@ def enviar_email_requisicao(requisicao, tipo_notificacao):
                     <td>{item.get('prazo_entrega', '-')}</td>
                 </tr>
             """
-
-        html += """
-                </table>
-        """
-        
             # Adicionar observação do comprador para o item, se existir
             if item.get('observacao_comprador'):
                 html += f"""
-                    <tr style="background-color: #e8f5e9;">
-                        <td colspan="8" style="padding: 10px;">
-                            <strong>Observação do Comprador (Item {item.get('item')}):</strong> {item['observacao_comprador']}
-                        </td>
-                    </tr>
+                <tr style="background-color: #e8f5e9;">
+                    <td colspan="8" style="padding: 10px;">
+                        <strong>Observação do Comprador (Item {item.get('item')}):</strong> {item['observacao_comprador']}
+                    </td>
+                </tr>
                 """
 
         html += """
                 </table>
         """
-        
+
         # Adiciona observações gerais do vendedor se existirem
         if requisicao.get('observacoes_vendedor'):
             html += f"""
