@@ -250,18 +250,22 @@ EMAIL_CONFIG = {
 
 def enviar_email_requisicao(requisicao, tipo_notificacao):
     try:
+        # Garantir que os valores de venda unitária e total sejam calculados antes de enviar o e-mail
+        for item in requisicao['items']:
+            # Calcular preço unitário de venda
+            item['venda_unit'] = item.get('custo_unit', 0) * (1 + item.get('markup', 0) / 100)
+            # Calcular preço total
+            item['total'] = item['venda_unit'] * item.get('quantidade', 0)
+
+        # Configuração do e-mail
         msg = MIMEMultipart()
         msg['From'] = EMAIL_CONFIG['EMAIL']
-        msg['Subject'] = f"SUA REQUISIÇÃO Nº{
-            requisicao['numero']} FOI {
-            tipo_notificacao.upper()}"
+        msg['Subject'] = f"SUA REQUISIÇÃO Nº {requisicao['numero']} FOI {tipo_notificacao.upper()}"
 
         # Define destinatários
         vendedor_email = st.session_state.usuarios[requisicao['vendedor']]['email']
         comprador_email = st.session_state.usuarios.get(
-            requisicao.get(
-                'comprador_responsavel', ''), {}).get(
-            'email', '')
+            requisicao.get('comprador_responsavel', ''), {}).get('email', '')
 
         msg['To'] = vendedor_email
         if comprador_email:
@@ -297,13 +301,13 @@ def enviar_email_requisicao(requisicao, tipo_notificacao):
         for item in requisicao['items']:
             html += f"""
                 <tr>
-                    <td>{item['item']}</td>
-                    <td>{item['codigo']}</td>
-                    <td>{item['descricao']}</td>
-                    <td>{item['marca']}</td>
-                    <td>{item['quantidade']}</td>
-                    <td>R$ {item.get('venda_unit', 0):.2f}</td>
-                    <td>R$ {item.get('venda_unit', 0) * item['quantidade']:.2f}</td>
+                    <td>{item.get('item', '-')}</td>
+                    <td>{item.get('codigo', '-')}</td>
+                    <td>{item.get('descricao', '-')}</td>
+                    <td>{item.get('marca', '-')}</td>
+                    <td>{item.get('quantidade', 0)}</td>
+                    <td>R$ {item.get('venda_unit', 0):,.2f}</td>
+                    <td>R$ {item.get('total', 0):,.2f}</td>
                     <td>{item.get('prazo_entrega', '-')}</td>
                 </tr>
             """
@@ -311,6 +315,7 @@ def enviar_email_requisicao(requisicao, tipo_notificacao):
         html += """
                 </table>
         """
+        
         # Adiciona observações se existirem
         if requisicao.get('observacao_geral'):
             html += f"""
